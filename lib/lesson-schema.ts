@@ -46,9 +46,9 @@ export const researchSourceSchema = z.object({
 export const visualPartSchema = z.object({
   type: z.preprocess((val) => {
     const s = String(val ?? "").toLowerCase();
-    const valid = ["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles"];
+    const valid = ["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles", "orbit", "cluster", "quarks"];
     return valid.includes(s) ? s : "rect";
-  }, z.enum(["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles"])),
+  }, z.enum(["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles", "orbit", "cluster", "quarks"])),
   x: z.coerce.number().default(0),
   y: z.coerce.number().default(0),
   width: z.coerce.number().default(100),
@@ -168,7 +168,7 @@ const partSchema = {
   additionalProperties: false,
   required: ["type", "x", "y", "width", "height", "data", "text", "fill", "stroke", "strokeWidth", "opacity"],
   properties: {
-    type: { type: "string", enum: ["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles"] },
+    type: { type: "string", enum: ["ellipse", "rect", "line", "arrow", "polyline", "polygon", "path", "text", "axes", "radial", "coil", "wave", "particles", "orbit", "cluster", "quarks"] },
     x: { type: "number" }, y: { type: "number" }, width: { type: "number" }, height: { type: "number" },
     data: { type: "string" }, text: { type: "string" }, fill: colorSchema, stroke: colorSchema,
     strokeWidth: { type: "number" }, opacity: { type: "number" },

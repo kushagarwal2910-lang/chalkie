@@ -90,6 +90,25 @@ function axisPlot(part: VisualPart) {
   };
 }
 
+function parseClusterData(data: string, fallbackTotal = 12) {
+  let protons = 0;
+  let neutrons = 0;
+  if (/protons?\s*:\s*\d+/i.test(data)) {
+    const pMatch = data.match(/protons?\s*:\s*(\d+)/i);
+    if (pMatch) protons = parseInt(pMatch[1], 10);
+  }
+  if (/neutrons?\s*:\s*\d+/i.test(data)) {
+    const nMatch = data.match(/neutrons?\s*:\s*(\d+)/i);
+    if (nMatch) neutrons = parseInt(nMatch[1], 10);
+  }
+  if (protons === 0 && neutrons === 0) {
+    const total = countFromData(data, fallbackTotal, 4, 30);
+    protons = Math.ceil(total / 2);
+    neutrons = Math.floor(total / 2);
+  }
+  return { protons: Math.min(16, protons), neutrons: Math.min(16, neutrons) };
+}
+
 function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean) {
   if (hasAxes) return null;
   // If the object already has its own vector illustration parts, DO NOT draw a card box around it
@@ -304,14 +323,18 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             const maxRy = Math.min(cy, shape.props.h - cy);
             const rx = Math.max(2, Math.min(maxRx, part.width / 2));
             const ry = Math.max(2, Math.min(maxRy, part.height / 2));
+            // Keep circular proportions if aspect ratio is roughly square or marked as circle
+            const isCircle = Math.abs(rx - ry) / Math.max(rx, ry) < 0.28 || part.data === "circle";
+            const finalRx = isCircle ? Math.min(rx, ry) : rx;
+            const finalRy = isCircle ? Math.min(rx, ry) : ry;
             return (
               <ellipse
                 key={key}
                 {...common}
                 cx={cx}
                 cy={cy}
-                rx={rx}
-                ry={ry}
+                rx={finalRx}
+                ry={finalRy}
               />
             );
           }
@@ -424,6 +447,128 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
                 {tickYs.map((y) => <line key={`y-${y}`} x1={bounds.left - 4} y1={y} x2={bounds.left + 4} y2={y} opacity="0.45" />)}
                 <text x={(bounds.left + bounds.right) / 2} y={part.y + part.height - 9} fill={axisColor} stroke="#fbfaf7" strokeWidth="4" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700">{labels.x}</text>
                 <text x={part.x + 11} y={(bounds.top + bounds.bottom) / 2} fill={axisColor} stroke="#fbfaf7" strokeWidth="4" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700" transform={`rotate(-90 ${part.x + 11} ${(bounds.top + bounds.bottom) / 2})`}>{labels.y}</text>
+              </g>
+            );
+          }
+
+          if (part.type === "orbit") {
+            const count = countFromData(part.data, 2, 1, 32);
+            const cx = part.x + part.width / 2;
+            const cy = part.y + part.height / 2;
+            const radius = Math.max(10, Math.min(part.width, part.height) / 2);
+            return (
+              <g key={key}>
+                {/* Clean circular orbit ring */}
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={radius}
+                  fill="none"
+                  stroke={common.stroke || palette.slate}
+                  strokeWidth={1.5}
+                  strokeDasharray="6 4"
+                  opacity={0.7}
+                />
+                {/* Rotating electron particles on the orbit ring */}
+                <g className="animated-spin" style={{ transformOrigin: `${cx}px ${cy}px` }}>
+                  {Array.from({ length: count }, (_, i) => {
+                    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+                    const ex = cx + radius * Math.cos(angle);
+                    const ey = cy + radius * Math.sin(angle);
+                    return (
+                      <g key={i} transform={`translate(${ex}, ${ey})`}>
+                        <circle r={5} fill="#06b6d4" stroke="#0284c7" strokeWidth={1.5} filter={`url(#${markerId}-glow)`} />
+                        <text y={0.5} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize="8" fontWeight="900">-</text>
+                      </g>
+                    );
+                  })}
+                </g>
+              </g>
+            );
+          }
+
+          if (part.type === "cluster") {
+            const { protons, neutrons } = parseClusterData(part.data);
+            const total = protons + neutrons;
+            const cx = part.x + part.width / 2;
+            const cy = part.y + part.height / 2;
+            const sphereRadius = Math.max(5, Math.min(9, Math.min(part.width, part.height) / (Math.sqrt(total) * 3)));
+
+            // Interleaved protons and neutrons
+            let pLeft = protons;
+            let nLeft = neutrons;
+            const types: Array<"proton" | "neutron"> = [];
+            for (let i = 0; i < total; i++) {
+              if (i % 2 === 0 && pLeft > 0) { types.push("proton"); pLeft--; }
+              else if (nLeft > 0) { types.push("neutron"); nLeft--; }
+              else { types.push("proton"); }
+            }
+
+            return (
+              <g key={key} className="animated-particle">
+                {types.map((type, i) => {
+                  const r = i === 0 ? 0 : sphereRadius * Math.sqrt(i) * 1.6;
+                  const theta = i * 2.39996323; // Golden angle for even packing
+                  const px = cx + r * Math.cos(theta);
+                  const py = cy + r * Math.sin(theta);
+                  const isProton = type === "proton";
+                  const fill = isProton ? "#dc2626" : "#2563eb";
+                  const stroke = isProton ? "#b91c1c" : "#1d4ed8";
+                  const symbol = isProton ? "+" : "n";
+                  return (
+                    <g key={i} transform={`translate(${px}, ${py})`}>
+                      <circle r={sphereRadius} fill={fill} stroke={stroke} strokeWidth={1.2} filter={`url(#${markerId}-shadow)`} />
+                      <text y={0.5} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize={Math.max(7, sphereRadius * 0.95)} fontWeight="800">
+                        {symbol}
+                      </text>
+                    </g>
+                  );
+                })}
+              </g>
+            );
+          }
+
+          if (part.type === "quarks") {
+            const flavors = (part.data || "u,u,d").split(",").map((s) => s.trim().toLowerCase());
+            const cx = part.x + part.width / 2;
+            const cy = part.y + part.height / 2;
+            const r = Math.max(16, Math.min(part.width, part.height) * 0.28);
+            const quarkRadius = Math.max(10, r * 0.42);
+
+            // 3 quark positions in an equilateral triangle
+            const quarkCoords = [0, 1, 2].map((i) => {
+              const angle = (i / 3) * Math.PI * 2 - Math.PI / 2;
+              return {
+                x: cx + r * Math.cos(angle),
+                y: cy + r * Math.sin(angle),
+                flavor: flavors[i] || "u",
+              };
+            });
+
+            return (
+              <g key={key}>
+                {/* Gluon field lines connecting the quarks */}
+                <line x1={quarkCoords[0].x} y1={quarkCoords[0].y} x2={quarkCoords[1].x} y2={quarkCoords[1].y} stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" />
+                <line x1={quarkCoords[1].x} y1={quarkCoords[1].y} x2={quarkCoords[2].x} y2={quarkCoords[2].y} stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" />
+                <line x1={quarkCoords[2].x} y1={quarkCoords[2].y} x2={quarkCoords[0].x} y2={quarkCoords[0].y} stroke="#f59e0b" strokeWidth={2} strokeDasharray="3 3" />
+
+                {quarkCoords.map((q, i) => {
+                  const isUp = q.flavor === "u";
+                  const fill = isUp ? "#2563eb" : "#dc2626";
+                  const stroke = isUp ? "#1d4ed8" : "#b91c1c";
+                  const charge = isUp ? "+2/3" : "-1/3";
+                  return (
+                    <g key={i} transform={`translate(${q.x}, ${q.y})`}>
+                      <circle r={quarkRadius} fill={fill} stroke={stroke} strokeWidth={2} filter={`url(#${markerId}-shadow)`} />
+                      <text y={-1} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize={quarkRadius * 0.9} fontWeight="900">
+                        {q.flavor}
+                      </text>
+                      <text y={quarkRadius + 10} textAnchor="middle" dominantBaseline="middle" fill="#475569" fontSize="8" fontWeight="700">
+                        {charge}
+                      </text>
+                    </g>
+                  );
+                })}
               </g>
             );
           }

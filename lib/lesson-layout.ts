@@ -69,7 +69,7 @@ function normalizePartCoordinates(part: VisualPart, objX: number, objY: number, 
 
 function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
   const pathData = /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]*$/;
-  const text = part.text.replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 42);
+  const text = (part.text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 42);
   const strokeWidth = part.stroke === "none" ? 0 : clamp(part.strokeWidth || 2, 1.5, 8);
   const opacity = clamp(part.opacity || 1, 0.3, 1);
 
@@ -94,7 +94,8 @@ function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
   let data = "";
   if (part.type === "path") data = pathData.test(part.data) ? part.data : "";
   else if (part.type === "polygon" || part.type === "polyline") data = sanitizePoints(part.data, bounds);
-  else if (["radial", "coil", "wave", "particles"].includes(part.type)) data = /^\s*\d+\s*$/.test(part.data) ? part.data.trim() : "";
+  else if (["radial", "coil", "wave", "particles", "orbit"].includes(part.type)) data = /^\s*\d+\s*$/.test(part.data) ? part.data.trim() : "";
+  else if (part.type === "cluster" || part.type === "quarks") data = part.data.replace(/[<>]/g, "").trim().slice(0, 60);
   else if (part.type === "axes") data = sanitizeAxesData(part.data);
   return { ...part, x, y, width, height, data, text, strokeWidth, opacity };
 }

@@ -133,8 +133,20 @@ VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
    - Draw cutaway chambers (rect/polygon), piston head with compression rings, wrist pin and connecting rod, intake/exhaust valves (polygon/polyline), spark plug arc (path/wave), and fuel/fluid particle fields (particles)!
 3. BIOLOGY, ANATOMY & MEDICINE (e.g. Heart, Neuron, Vaccine, Virus, DNA):
    - Draw anatomical organ cutaways, cell lipid bilayer membranes, receptor protein pockets, Y-shaped antibodies, or synaptic terminal vesicles with neurotransmitter particles!
-4. PHYSICS & CHEMISTRY (e.g. Atom, Laser, Battery, Greenhouse, Quantum):
-   - Draw nucleus with orbital shells (ellipse), photon wave packets (wave), electrolyte ions (particles), cathode/anode plates!
+4. PHYSICS, CHEMISTRY & SUBATOMIC PARTICLES (e.g. Atom, Laser, Battery, Quarks, Quantum):
+   - Draw authentic Bohr/Quantum atomic models and subatomic particle breakdowns:
+     * For "Atom Structure / Overview":
+       - Object 1: Atom Overview (role: "container", label: "Atom Structure", width: 440, height: 320):
+         * Nucleus Part (type: "cluster", data: "protons:6|neutrons:6", fill: "red", stroke: "blue", width: 100, height: 100, x: 170, y: 110): Dense sphere of alternating red protons (+) and blue neutrons (n).
+         * 1st Shell (type: "orbit", data: "2", stroke: "slate", width: 200, height: 200, x: 120, y: 60): True circular ring with 2 rotating cyan electrons (-).
+         * 2nd Shell (type: "orbit", data: "4", stroke: "slate", width: 300, height: 300, x: 70, y: 10): Outer circular ring with 4 rotating cyan electrons (-).
+       - Object 2: Proton Close-up (role: "component", label: "Proton (uud)", width: 140, height: 140):
+         * Outer boundary (type: "ellipse", width: 130, height: 130, x: 5, y: 5, fill: "none", stroke: "ink", strokeWidth: 2).
+         * Quarks triplet (type: "quarks", data: "u,u,d", width: 120, height: 120, x: 10, y: 10): 2 Up quarks (blue, +2/3) and 1 Down quark (red, -1/3) bound by gluon springs.
+       - Object 3: Neutron Close-up (role: "component", label: "Neutron (udd)", width: 140, height: 140):
+         * Outer boundary (type: "ellipse", width: 130, height: 130, x: 5, y: 5, fill: "none", stroke: "ink", strokeWidth: 2).
+         * Quarks triplet (type: "quarks", data: "u,d,d", width: 120, height: 120, x: 10, y: 10): 1 Up quark (blue, +2/3) and 2 Down quarks (red, -1/3) bound by gluon springs.
+       - Connections: Connect Atom -> Proton and Atom -> Neutron (clean directional links).
 5. QUANTITATIVE & ECONOMICS (e.g. Supply & Demand, Velocity, Thermodynamics):
    - Draw complete coordinate frame with "axes" primitive (data: "x:Label|y:Label"), smooth plotted curves (path/polyline), equilibrium points (ellipse), and shift arrows!
 6. URBAN PLANNING, ARCHITECTURE, CIVILIZATIONS & ANCIENT HISTORY (e.g. Indus Valley, Roman Aqueduct, Mohenjo-Daro, Pyramids, Grid Cities):
@@ -160,6 +172,9 @@ SPATIAL GEOMETRY & COMPOSITION (1000x620 Bounded Presentation Canvas):
 - Primitive grammar in parts:
   * rect: plates, gates, chambers, layers, chips, pins, contacts.
   * ellipse: atoms, particles, charge carriers, lenses, nodes, wheels.
+  * orbit: true circular electron shell orbits with evenly spaced rotating cyan electrons (data: integer electron count 1-32).
+  * cluster: dense nucleon cluster with alternating red protons (+) and blue neutrons (n) (data: "protons:X|neutrons:Y" or count).
+  * quarks: subatomic quark triplet in equilateral triangle with colors and fractional charges (data: "u,u,d" or "u,d,d").
   * path / polyline / polygon: cutaways, contours, channels, membranes, circuits.
   * particles: trapped electrons, gas molecules, fluid particles, photons (data: integer count 6-36).
   * wave: periodic signal, AC current, EM wave, light frequency (data: cycle count 2-12).
