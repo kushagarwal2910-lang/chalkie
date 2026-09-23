@@ -1,0 +1,61 @@
+{
+  "name": "chalkie-ai-whiteboard",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "dev": "node server.mjs",
+    "dev:next": "next dev",
+    "dev:vercel": "vercel dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint . --ignore-pattern .next",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@base-ui/react": "^1.7.0",
+    "@hookform/resolvers": "^5.7.1",
+    "@shadcn/react": "^0.3.0",
+    "@vercel/functions": "^3.4.3",
+    "class-variance-authority": "0.7.1",
+    "clsx": "2.1.1",
+    "cmdk": "^1.1.1",
+    "date-fns": "^4.4.0",
+    "embla-carousel-react": "^8.6.0",
+    "ioredis": "^5.8.2",
+    "input-otp": "^1.4.2",
+    "lucide-react": "^1.31.0",
+    "next": "16.3.4",
+    "next-themes": "^0.4.6",
+    "radix-ui": "^1.6.7",
+    "react": "19.2.6",
+    "react-day-picker": "^10.0.1",
+    "react-dom": "19.2.6",
+    "react-hook-form": "^7.85.0",
+    "react-resizable-panels": "^4.12.2",
+    "recharts": "^3.8.0",
+    "sonner": "^2.0.8",
+    "tailwind-merge": "3.6.0",
+    "tldraw": "^5.4.0",
+    "vaul": "^1.1.2",
+    "ws": "^8.18.3",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "4.2.1",
+    "@types/node": "22.19.19",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
+    "@types/ws": "^8.18.1",
+    "eslint": "9.39.4",
+    "eslint-config-next": "16.3.4",
+    "tailwindcss": "4.2.1",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "5.9.3",
+    "vercel": "^54.14.2"
+  },
+  "type": "module",
+  "packageManager": "pnpm@11.0.0"
+}
