@@ -66,42 +66,65 @@ When a learner asks a conceptual question by text or voice:
 
 ```mermaid
 flowchart TD
-    User([Learner Inquiry: Voice / Text]) --> Ingest[Next.js App Router / API Layer]
+    UserReq["User request"] -->|"Query"| TavilyNode["Tavily (30-35)"]
     
-    subgraph ResearchPipeline ["1. Hybrid Research & RAG"]
-        Ingest --> Tavily[Tavily Search API: up to 20 Sources]
-        Tavily --> Chunker[Chunking: 1800 chars / 250 overlap]
-        Chunker --> Lexical[BM25 Log-Frequency Scoring]
-        Chunker --> VectorEmbed[OpenAI-Compatible Embeddings]
-        Lexical & VectorEmbed --> HybridScorer[Hybrid Ranker: 62% Semantic + 38% Lexical]
-        HybridScorer --> GroqRerank[Groq GPT-OSS-120B Precision Reranking]
-        GroqRerank --> ContextIndex[(Research Index: Memory / Redis)]
-    end
-
-    subgraph LLMEngine ["2. Semantic Schema Generation"]
-        ContextIndex --> PromptEngine[Groq Client: openai/gpt-oss-120b]
-        PromptEngine --> StickyPool[Sticky Key Failover Pool: 3 Slots]
-        StickyPool --> SchemaOut[Structured Output: lessonJsonSchema]
-        SchemaOut --> ZodValidator{Zod Whitelist Validation}
-    end
-
-    subgraph SpatialEngines ["3. Spatial & Geometric Grammar"]
-        ZodValidator --> Repaired[repairAndValidateLessonPlan]
-        Repaired --> ElkLayout[ELK.js Layered Hierarchical Engine]
-        ElkLayout --> DagreLayout[Dagre Directed Graph Fallback]
-        ElkLayout --> CollisionPass[Iterative Collision Relaxation: 30 Passes]
-        CollisionPass --> AnchorCalc[Automatic Anchor & Route Calculation]
-    end
-
-    subgraph PresentationEngine ["4. Whiteboard & Audio Presentation"]
-        AnchorCalc --> Canvas[tldraw v5.4 Infinite Canvas]
-        AnchorCalc --> SpeechPrep[Speech Formatter: Phonetic & Unit Expander]
-        SpeechPrep --> VoiceEngine[Voice Selection Engine: Neural Priority]
-        VoiceEngine --> AudioStream[Speech Synthesis: Groq / Web Speech API]
-        AudioStream -. Synchronized .-> LaserPointer[Glowing Laser Cursor & Camera Tracking]
-        LaserPointer -. Progressive Reveal .-> Canvas
-    end
+    TavilyNode -->|"HTTP GET"| WebInternet(("Web / Internet"))
+    WebInternet -->|"Scraped Content"| TavilyNode
+    
+    TavilyNode -->|"30-35 Documents"| RAGIndex[("RAG Index")]
+    
+    RAGIndex --> PrimaryLLM["LLM (openai/gpt-oss-120b)"]
+    PrimaryLLM -->|"Synthesizes Simulations & Visuals"| OverviewJSON["overview.JSON<br/>(Diagrams, Simulations, Cross-Sections)"]
+    
+    UserVoice(("User voice")) -->|"Mic Audio Stream"| LLMVA["LLM for V.A (openai/gpt-oss-120b)"]
+    RAGIndex -->|"Grounding Context"| LLMVA
+    
+    OverviewJSON -->|"Shape & Animation Schema"| TldrawSDK["TLDRAW SDK<br/>(Programmatic Editor API)"]
+    OverviewJSON -->|"Voice Stream"| Voiceover["Voiceover"]
+    
+    LLMVA -->|"websocket (Realtime Commands,<br/>Laser Coords & Dynamic Visuals)"| TldrawSDK
+    
+    TldrawSDK -->|"Step-by-step Live Drawing & Simulations"| CanvasLive["Canvas<br/>(Live Animated Drawings & Simulations)"]
+    TldrawSDK -->|"Macro Knowledge Map"| CanvasOverview["Overview Canvas<br/>(Structural Map & Deep Diagrams)"]
+    
+    Voiceover --> Buffer(("Buffer"))
+    CanvasLive --> Buffer
+    
+    Buffer --> Output["Output<br/>(Interactive Classroom Experience)"]
+    
+    Output -.->|"Persist & Sync"| Storage["Client Storage & Google Drive<br/><b>All state stored on Client (Browser/IndexedDB)</b><br/>Syncs to Google Drive by asking permission during sign-in"]
 ```
+
+### Architectural Pipeline Breakdown
+
+The architecture follows a dual-engine loop uniting live web research, deep LLM diagram synthesis, and a real-time voice assistant:
+
+1. **User Request & Autonomous Web Scraping (`Tavily 30-35` $\leftrightarrow$ `Web / Internet`):**
+   - The learner submits an inquiry via text or voice.
+   - Tavily queries the web, scraping 30–35 rich documents and markdown extracts (`HTTP GET` / `Scraped Content`).
+   - Content is chunked into 1800-character segments with 250-character semantic overlaps and ingested into the session's **RAG Index** (in-memory or Redis-backed).
+
+2. **Dual `openai/gpt-oss-120b` Model Execution:**
+   - **Primary Synthesis Engine (`LLM`):** Grounded in the `RAG Index`, this instance synthesizes real physical simulations, mechanistic cutaways, and scientific structures, compiling them into a strict, validated **`overview.JSON`** (containing shapes, parts, SVG vectors, coordinate bounds, connections, and narration segments).
+   - **Conversational Voice Assistant (`LLM for V.A`):** Ingests the learner's live microphone audio stream (`User voice`) transcribed via Groq Whisper. Grounded by the active `RAG Index`, it sends immediate commands, laser coordinates, and dynamic shape extensions over **WebSockets** (`ws://.../api/ws`).
+
+3. **TLDRAW SDK (Programmatic Editor API) & Dual Canvas Surfaces:**
+   - Consumes the **Shape & Animation Schema** from `overview.JSON`.
+   - Ingests real-time WebSocket frames (`Realtime Commands, Laser Coords & Dynamic Visuals`) from the Voice Assistant.
+   - Controls two core visual modalities:
+     - **Canvas (Live Animated Drawings & Simulations):** Progressive step-by-step chalkboard drawing, parametric scientific primitives (orbits, clusters, quarks, waves, coils, particles), and laser spotlight tracking.
+     - **Overview Canvas (Structural Map & Deep Diagrams):** Macro knowledge map providing high-level structural cutaways, cross-sections, and domain relationships.
+
+4. **Audio-Visual Synchronization Buffer:**
+   - `overview.JSON` streams narration segments to the **Voiceover** engine (preprocessed by `speech-formatter.ts` for unit expansion and phonetic pacing).
+   - Both **Voiceover** and **Canvas (Live Animated Drawings & Simulations)** feed into an internal **Buffer** (synchronization lock). The next visual drawing segment advances only when the current spoken narration finishes, guaranteeing 100% audio-visual alignment.
+
+5. **Output (Interactive Classroom Experience):**
+   - Delivers a live classroom experience where the camera glides across the chalkboard, the laser pointer highlights active components, and the teacher explains concepts in natural spoken English.
+
+6. **Persistence & Sync (`Client Storage & Google Drive`):**
+   - **Local IndexedDB:** All session states, lessons, and tldraw canvas records are saved directly in the user's browser.
+   - **Google Drive Sync:** Users can sign in via Google OAuth (`drive.file` scope) to backup and restore `.json` lesson archives seamlessly without third-party cloud database dependencies.
 
 ---
 
