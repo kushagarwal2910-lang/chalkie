@@ -256,8 +256,8 @@ export function layoutConnectedLessonWithDagre(
   for (const obj of lesson.objects) {
     objMap.set(obj.id, obj);
     g.setNode(obj.id, {
-      width: Math.max(70, obj.width),
-      height: Math.max(50, obj.height),
+      width: Math.max(150, obj.width),
+      height: Math.max(80, obj.height),
     });
   }
 
@@ -457,14 +457,13 @@ export function applySpatialAutoLayout(
         { x: canvasMinX + colW + gap, y: canvasMinY, w: colW, h: colH },
       ];
     } else if (containers.length === 3) {
-      // 2-Row Master Layout: Column 1 on left (Citadel), Stacked Column 2 on right (Lower Town & Drainage)
-      const col1W = snapToGrid((contentMaxW - gap) * 0.44, gridSize);
-      const col2W = snapToGrid(contentMaxW - col1W - gap, gridSize);
-      const stackedH = snapToGrid((contentMaxH - gap) / 2, gridSize);
+      // 3 balanced side-by-side columns (e.g. Input Layer, Hidden Layer, Output Layer)
+      const colW = snapToGrid((contentMaxW - gap * 2) / 3, gridSize);
+      const colH = snapToGrid(contentMaxH, gridSize);
       containerSlots = [
-        { x: canvasMinX, y: canvasMinY, w: col1W, h: contentMaxH },
-        { x: canvasMinX + col1W + gap, y: canvasMinY, w: col2W, h: stackedH },
-        { x: canvasMinX + col1W + gap, y: canvasMinY + stackedH + gap, w: col2W, h: stackedH },
+        { x: canvasMinX, y: canvasMinY, w: colW, h: colH },
+        { x: canvasMinX + colW + gap, y: canvasMinY, w: colW, h: colH },
+        { x: canvasMinX + (colW + gap) * 2, y: canvasMinY, w: colW, h: colH },
       ];
     } else {
       // 2x2 Grid

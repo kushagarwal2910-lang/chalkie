@@ -3,17 +3,17 @@
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
 :root {
-  --background: #edf0f5;
-  --foreground: #202124;
-  --panel: #141519;
-  --panel-high: #1b1d22;
-  --line: #292b32;
-  --muted: #969aa4;
-  --chalk: #f6f1df;
-  --violet: #9c8cff;
-  --violet-strong: #7164ff;
-  --mint: #61d8b3;
-  --orange: #ffb36b;
+  --background: #090a0f;
+  --foreground: #f3f4f6;
+  --panel: #0e1017;
+  --panel-high: #161822;
+  --line: #1f2333;
+  --muted: #9ca3af;
+  --chalk: #f8fafc;
+  --violet: #818cf8;
+  --violet-strong: #6366f1;
+  --mint: #34d399;
+  --orange: #fb923c;
   --radius: 0.75rem;
 }
 
@@ -25,18 +25,19 @@ body {
   color: var(--foreground);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   overflow: hidden;
+  color-scheme: dark;
 }
 button, input, textarea { font: inherit; }
 button { color: inherit; }
-::selection { background: #7264ff55; }
+::selection { background: #6366f155; }
 
 .scrollbar-none { scrollbar-width: none; }
 .scrollbar-none::-webkit-scrollbar { display: none; }
 
 .soft-grid {
   background-image:
-    linear-gradient(#ffffff08 1px, transparent 1px),
-    linear-gradient(90deg, #ffffff08 1px, transparent 1px);
+    linear-gradient(#ffffff0a 1px, transparent 1px),
+    linear-gradient(90deg, #ffffff0a 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -48,18 +49,19 @@ button { color: inherit; }
 
 .live-pulse { animation: live-pulse 1.8s ease-in-out infinite; }
 @keyframes live-pulse {
-  0%, 100% { box-shadow: 0 0 0 0 #61d8b344; }
-  50% { box-shadow: 0 0 0 6px #61d8b300; }
+  0%, 100% { box-shadow: 0 0 0 0 #34d39944; }
+  50% { box-shadow: 0 0 0 6px #34d39900; }
 }
 
 .voice-ring { animation: voice-ring 1.15s ease-out infinite; }
 @keyframes voice-ring {
-  0% { box-shadow: 0 0 0 0 #ff8da166; transform: scale(1); }
-  65% { box-shadow: 0 0 0 9px #ff8da100; transform: scale(1.04); }
-  100% { box-shadow: 0 0 0 0 #ff8da100; transform: scale(1); }
+  0% { box-shadow: 0 0 0 0 #f43f5e66; transform: scale(1); }
+  65% { box-shadow: 0 0 0 9px #f43f5e00; transform: scale(1.04); }
+  100% { box-shadow: 0 0 0 0 #f43f5e00; transform: scale(1); }
 }
 
-.tldraw-shell .tl-container { background: #fbfaf7; }
+.tldraw-shell .tl-container { background: #0c0d12; color-scheme: dark; }
+.tldraw-shell .tl-background { background: #0c0d12 !important; }
 .tldraw-shell .tlui-layout__top,
 .tldraw-shell .tlui-layout__bottom { z-index: 10; }
 .tldraw-shell.is-presenting .tlui-layout__top,
@@ -72,3 +74,16 @@ button { color: inherit; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; scroll-behavior: auto !important; }
 }
+
+/* Completely suppress Next.js dev indicator badge and overlays */
+nextjs-portal,
+[data-nextjs-dev-tools-button],
+[data-nextjs-toast-wrapper],
+#nextjs-dev-tools,
+div[data-next-badge],
+[data-next-mark] {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+

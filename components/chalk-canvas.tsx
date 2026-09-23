@@ -12,10 +12,11 @@ import {
 } from "tldraw";
 import type { LessonPlan, LessonSegment, VisualConnection, VisualObject } from "@/lib/lesson-schema";
 import { CHALK_VISUAL_TYPE, chalkShapeUtils } from "@/components/chalk-visual-shape";
-import { applySpatialAutoLayout } from "@/lib/tldraw-spatial-layout";
+import { CUSTOM_CHART_TYPE, CUSTOM_SVG_TYPE, CUSTOM_TEMPLATE_TYPE } from "@/components/custom-shapes";
+import { applyElkLayout } from "@/lib/elk-spatial-layout";
 
 const tldrawColor: Record<string, "black" | "grey" | "blue" | "light-blue" | "violet" | "orange" | "green" | "red" | "yellow"> = {
-  ink: "black", slate: "grey", blue: "blue", cyan: "light-blue", violet: "violet", orange: "orange", green: "green", red: "red", yellow: "yellow", white: "grey", none: "grey",
+  ink: "light-blue", slate: "grey", blue: "blue", cyan: "light-blue", violet: "violet", orange: "orange", green: "green", red: "red", yellow: "yellow", white: "light-blue", none: "light-blue",
 };
 
 const anchorValue: Record<VisualConnection["fromAnchor"], { x: number; y: number }> = {
@@ -31,25 +32,151 @@ function objectShape(object: VisualObject): TLShapePartial {
   const shapeId = createShapeId(object.id);
   const color = tldrawColor[object.color || "ink"] ?? "black";
 
-  if (object.shapeType === "geo") {
-    const geo = validGeoNames.has(object.geo ?? "") ? (object.geo as any) : "rectangle";
+  if (
+    object.shapeType === "custom-template" ||
+    (object as any).type === "custom-template" ||
+    (object as any).templateType ||
+    (object as any).template
+  ) {
+    const rawProps = (object as any).props || (object as any).templateData || {};
+    const templateType =
+      rawProps.templateType ||
+      (object as any).templateType ||
+      (object as any).template ||
+      "hero-breakdown";
+
+    const validTemplateTypes = [
+      "network-graph",
+      "hero-breakdown",
+      "process-cycle",
+      "timeline",
+      "comparison-grid",
+      "layered-stack",
+    ];
+    const safeType = validTemplateTypes.includes(templateType)
+      ? templateType
+      : "hero-breakdown";
+
+    const dataPayload = rawProps.data || rawProps.content || (object as any).content || rawProps || {};
+
     return {
       id: shapeId,
-      type: "geo",
+      type: CUSTOM_TEMPLATE_TYPE,
       x: object.x,
       y: object.y,
       props: {
-        w: Math.max(60, object.width),
-        h: Math.max(40, object.height),
-        geo,
-        color,
-        fill: "semi",
-        dash: "draw",
-        size: "m",
-        font: "sans",
-        align: "middle",
-        verticalAlign: "middle",
-        richText: toRichText(object.label || ""),
+        w: Math.max(320, object.width || rawProps.w || 640),
+        h: Math.max(220, object.height || rawProps.h || 420),
+        templateType: safeType,
+        title: rawProps.title || object.label || "",
+        subtitle: rawProps.subtitle || "",
+        themeColor: rawProps.themeColor || object.color || "blue",
+        data: dataPayload,
+      },
+      meta: { chalkieId: object.id, role: object.role },
+    } as TLShapePartial;
+  }
+
+  if (object.shapeType === "custom-chart" || (object as any).type === "custom-chart") {
+
+    const rawProps = (object as any).props || (object as any).chart || {};
+    let rawData = rawProps.data;
+    if (typeof rawData === "string") {
+      try { rawData = JSON.parse(rawData); } catch { rawData = []; }
+    }
+    if (!rawData && object.parts?.[0]?.data) {
+      try { rawData = JSON.parse(object.parts[0].data); } catch { /* ignore */ }
+    }
+
+    const dataArray = Array.isArray(rawData) ? rawData : [];
+    const sanitizedData = dataArray.map((item: any, idx: number) => {
+      if (typeof item === "number") {
+        return { name: `Item ${idx + 1}`, value: Number.isFinite(item) ? item : (idx + 1) * 10 };
+      }
+      if (typeof item === "string") {
+        const parsed = parseFloat(item.replace(/[^0-9.-]/g, ""));
+        return { name: `Item ${idx + 1}`, value: Number.isFinite(parsed) ? parsed : (idx + 1) * 10 };
+      }
+      const name = String(item?.name ?? item?.label ?? item?.category ?? item?.x ?? item?.title ?? item?.key ?? `Item ${idx + 1}`);
+      const rawVal = item?.value ?? item?.val ?? item?.y ?? item?.amount ?? item?.count ?? item?.score ?? item?.number ?? item?.v;
+      const num = typeof rawVal === "number" ? rawVal : parseFloat(String(rawVal ?? "").replace(/[^0-9.-]/g, ""));
+      const value = Number.isFinite(num) ? num : (idx + 1) * 10;
+      return {
+        name: name || `Item ${idx + 1}`,
+        value,
+        color: item?.color ? String(item.color) : undefined,
+      };
+    });
+
+    const finalData = sanitizedData.length > 0 ? sanitizedData : [
+      { name: "Group A", value: 45 },
+      { name: "Group B", value: 85 },
+      { name: "Group C", value: 60 },
+    ];
+
+    const validChartTypes = ["bar", "line", "pie", "area"];
+    const chartType = validChartTypes.includes(rawProps.chartType) ? rawProps.chartType : "bar";
+
+    return {
+      id: shapeId,
+      type: CUSTOM_CHART_TYPE,
+      x: object.x,
+      y: object.y,
+      props: {
+        w: Math.max(200, object.width || rawProps.w || 440),
+        h: Math.max(160, object.height || rawProps.h || 280),
+        title: rawProps.title || object.label || "Statistical Chart",
+        chartType,
+        data: finalData,
+        xAxisLabel: rawProps.xAxisLabel || "",
+        yAxisLabel: rawProps.yAxisLabel || "",
+        color: rawProps.color || object.color || "blue",
+      },
+      meta: { chalkieId: object.id, role: object.role },
+    } as TLShapePartial;
+  }
+
+  if (object.shapeType === "custom-svg" || (object as any).type === "custom-svg") {
+    const rawProps = (object as any).props || (object as any).svg || {};
+    let svgString = rawProps.svgString || "";
+    if (!svgString && object.parts?.[0]?.data) {
+      svgString = object.parts[0].data;
+    }
+    if (!svgString && object.parts?.[0]?.text) {
+      svgString = object.parts[0].text;
+    }
+
+    return {
+      id: shapeId,
+      type: CUSTOM_SVG_TYPE,
+      x: object.x,
+      y: object.y,
+      props: {
+        w: Math.max(80, object.width || rawProps.w || 360),
+        h: Math.max(80, object.height || rawProps.h || 260),
+        title: rawProps.title || object.label || "",
+        caption: rawProps.caption || "",
+        svgString: typeof svgString === "string" ? svgString : "",
+      },
+      meta: { chalkieId: object.id, role: object.role },
+    } as TLShapePartial;
+  }
+
+  if (object.shapeType === "geo") {
+    // Upgrade generic geo objects to chalk-visual so they render as rich visual components with
+    // proper chassis and SVG parts, eliminating crude hand-drawn wireframe boxes!
+    return {
+      id: shapeId,
+      type: CHALK_VISUAL_TYPE,
+      x: object.x,
+      y: object.y,
+      props: {
+        w: Math.max(120, object.width),
+        h: Math.max(80, object.height),
+        label: object.label || "",
+        labelPlacement: object.labelPlacement || "below",
+        role: object.role,
+        partsJson: JSON.stringify(object.parts || []),
       },
       meta: { chalkieId: object.id, role: object.role },
     } as TLShapePartial;
@@ -76,24 +203,19 @@ function objectShape(object: VisualObject): TLShapePartial {
       } as TLShapePartial;
     }
 
-    // Otherwise, render as a sleek chalk card / geo rectangle with proper width/height
+    // Otherwise, render as a sleek chalk visual card
     return {
       id: shapeId,
-      type: "geo",
+      type: CHALK_VISUAL_TYPE,
       x: object.x,
       y: object.y,
       props: {
-        w: Math.max(140, object.width),
+        w: Math.max(150, object.width),
         h: Math.max(80, object.height),
-        geo: "rectangle",
-        color: tldrawColor[object.color || "blue"] ?? "blue",
-        fill: "semi",
-        dash: "draw",
-        size: "m",
-        font: "sans",
-        align: "middle",
-        verticalAlign: "middle",
-        richText: toRichText(object.label || ""),
+        label: object.label || "",
+        labelPlacement: object.labelPlacement || "inside",
+        role: object.role,
+        partsJson: JSON.stringify(object.parts || []),
       },
       meta: { chalkieId: object.id, role: object.role },
     } as TLShapePartial;
@@ -144,11 +266,8 @@ function anchorPoint(object: VisualObject, anchor: VisualConnection["fromAnchor"
 
 const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
 
-function syncScene(editor: Editor, rawLesson: LessonPlan, visibleIds?: Set<string>, reset = false) {
+function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>, reset = false) {
   if (reset) editor.deleteShapes(Array.from(editor.getCurrentPageShapeIds()));
-
-  // Intercept LLM's generated JSON before rendering, applying spatial auto-layout with tldraw Editor API
-  const lesson = applySpatialAutoLayout(editor, rawLesson);
 
   // 1. Determine which objects should be visible right now (progressive reveal)
   const shouldBeVisible = new Set<string>();
@@ -194,11 +313,42 @@ function syncScene(editor: Editor, rawLesson: LessonPlan, visibleIds?: Set<strin
   }
 
   if (existingToUpdate.length) {
-    editor.updateShapes(existingToUpdate);
+    try {
+      editor.updateShapes(existingToUpdate);
+    } catch (err) {
+      console.warn("[chalkie] shape update notice", err);
+    }
   }
 
   if (missingObjects.length) {
-    editor.createShapes(missingObjects.map(objectShape));
+    try {
+      editor.createShapes(missingObjects.map(objectShape));
+    } catch (err) {
+      console.error("[chalkie] failed to create shapes with primary util, falling back to visual chassis", err);
+      try {
+        const fallbacks = missingObjects.map((obj) => {
+          const s = objectShape(obj);
+          if (s.type !== CHALK_VISUAL_TYPE) {
+            return {
+              ...s,
+              type: CHALK_VISUAL_TYPE,
+              props: {
+                w: Math.max(150, obj.width || 240),
+                h: Math.max(80, obj.height || 140),
+                label: obj.label || "",
+                labelPlacement: "below" as const,
+                role: obj.role,
+                partsJson: JSON.stringify(obj.parts || []),
+              },
+            };
+          }
+          return s;
+        });
+        editor.createShapes(fallbacks);
+      } catch (fallbackErr) {
+        console.error("[chalkie] fatal shape creation failure", fallbackErr);
+      }
+    }
   }
 
   // 4. Directional arrow connections: ONLY visible if BOTH from and to objects are visible!
@@ -281,36 +431,51 @@ function syncScene(editor: Editor, rawLesson: LessonPlan, visibleIds?: Set<strin
         ? connection.arrowhead
         : "arrow") as any;
 
-      editor.createShape({
-        id: arrowId,
-        type: "arrow",
-        x: start.x,
-        y: start.y,
-        props: {
-          kind: connection.route === "elbow" ? "elbow" : "arc",
-          start: { x: 0, y: 0 },
-          end: { x: end.x - start.x, y: end.y - start.y },
-          bend: connection.route === "straight" ? 0 : connection.bend,
-          color: tldrawColor[connection.color] ?? "grey",
-          size: "s",
-          dash: connection.route === "curve" ? "draw" : "solid",
-          fill: "none",
-          arrowheadStart: "none",
-          arrowheadEnd,
-          richText: connection.label ? toRichText(connection.label) : toRichText(""),
-          labelColor: "black",
-          font: "sans",
-        },
-        meta: { chalkieConnection: connection.id },
-      });
-      bindings.push(
-        { type: "arrow", fromId: arrowId, toId: fromId, props: { terminal: "start", normalizedAnchor: anchorValue[connection.fromAnchor], isPrecise: true, isExact: false, snap: "none" } },
-        { type: "arrow", fromId: arrowId, toId: toId, props: { terminal: "end", normalizedAnchor: anchorValue[connection.toAnchor], isPrecise: true, isExact: false, snap: "none" } },
-      );
+      try {
+        editor.createShape({
+          id: arrowId,
+          type: "arrow",
+          x: start.x,
+          y: start.y,
+          props: {
+            kind: connection.route === "elbow" ? "elbow" : "arc",
+            start: { x: 0, y: 0 },
+            end: { x: end.x - start.x, y: end.y - start.y },
+            bend: connection.route === "straight" ? 0 : connection.bend,
+            color: (connection.color && tldrawColor[connection.color]) ? tldrawColor[connection.color] : "light-blue",
+            size: "m",
+            dash: connection.route === "curve" ? "draw" : "solid",
+            fill: "none",
+            arrowheadStart: "none",
+            arrowheadEnd,
+            richText: toRichText(""), // Clean arrow shaft! No printed text on or breaking arrow shafts
+            labelColor: "black",
+            font: "sans",
+          },
+          meta: {
+            chalkieConnection: connection.id,
+            label: connection.label || "",
+            from: from.label || connection.from,
+            to: to.label || connection.to,
+            connectionType: (connection as any).type || connection.route || "flow",
+          },
+        });
+        bindings.push(
+          { type: "arrow", fromId: arrowId, toId: fromId, props: { terminal: "start", normalizedAnchor: anchorValue[connection.fromAnchor], isPrecise: true, isExact: false, snap: "none" } },
+          { type: "arrow", fromId: arrowId, toId: toId, props: { terminal: "end", normalizedAnchor: anchorValue[connection.toAnchor], isPrecise: true, isExact: false, snap: "none" } },
+        );
+      } catch (err) {
+        console.warn("[chalkie] arrow creation notice", err);
+      }
     }
 
-    if (bindings.length) editor.createBindings(bindings);
-    if (arrowIds.length) editor.sendToBack(arrowIds);
+    if (bindings.length) {
+      try {
+        editor.createBindings(bindings);
+      } catch (err) {
+        console.warn("[chalkie] arrow binding notice", err);
+      }
+    }
   }
 
   const environments = visibleObjects
@@ -318,6 +483,11 @@ function syncScene(editor: Editor, rawLesson: LessonPlan, visibleIds?: Set<strin
     .map((object) => createShapeId(object.id))
     .filter((id) => editor.getShape(id));
   if (environments.length) editor.sendToBack(environments);
+
+  // Clear any shape selection so no blue bounding boxes or resize handles obstruct presentation
+  try {
+    editor.selectNone();
+  } catch {}
 }
 
 interface PresenterCursorState {
@@ -327,6 +497,7 @@ interface PresenterCursorState {
   label?: string;
   action?: string;
   targetBox?: { x: number; y: number; w: number; h: number } | null;
+  isDrawing?: boolean;
 }
 
 function frameCanvasScene(editor: Editor, duration = 420) {
@@ -368,37 +539,101 @@ export function ChalkCanvas({
   const editorRef = useRef<Editor | null>(null);
   const lessonIdRef = useRef<string | null>(null);
   const [cursor, setCursor] = useState<PresenterCursorState>({ visible: false, x: 0, y: 0 });
+  const [laidOutLesson, setLaidOutLesson] = useState<LessonPlan | null>(null);
+  const [hoveredArrow, setHoveredArrow] = useState<{
+    x: number;
+    y: number;
+    label: string;
+    from: string;
+    to: string;
+    type?: string;
+  } | null>(null);
+
+  // Apply universal ELK.js hierarchical layout whenever lesson plan is loaded
+  useEffect(() => {
+    if (!lesson || !lesson.objects.length) {
+      setLaidOutLesson(null);
+      return;
+    }
+
+    let active = true;
+    applyElkLayout(lesson).then((res) => {
+      if (active) setLaidOutLesson(res);
+    }).catch((err) => {
+      console.warn("[chalkie] ELK layout fallback", err);
+      if (active) setLaidOutLesson(lesson);
+    });
+
+    return () => { active = false; };
+  }, [lesson]);
+
+  const effectiveLesson = laidOutLesson || lesson;
 
   const handleMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
-    if (lesson && lesson.objects.length > 0) {
+    try {
+      editor.user.updateUserPreferences({ colorScheme: "dark" });
+    } catch {}
+    if (effectiveLesson && effectiveLesson.objects.length > 0) {
       const visibleIds = isPresenting
-        ? new Set(lesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
+        ? new Set(effectiveLesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
         : undefined;
-      syncScene(editor, lesson, visibleIds, true);
-      lessonIdRef.current = lesson.id;
+      syncScene(editor, effectiveLesson, visibleIds, true);
+      lessonIdRef.current = effectiveLesson.id;
     }
     window.setTimeout(() => {
       frameCanvasScene(editor, 400);
     }, 100);
-  }, [activeStep, isPresenting, lesson]);
+  }, [activeStep, isPresenting, effectiveLesson]);
 
-  // Synchronize whiteboard shapes on lesson or step changes
+  // Synchronize whiteboard shapes on lesson, layout, or step changes
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !lesson || !lesson.objects.length) return;
+    if (!editor || !effectiveLesson || !effectiveLesson.objects.length) return;
     const visibleIds = isPresenting
-      ? new Set(lesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
+      ? new Set(effectiveLesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
       : undefined;
-    const reset = lessonIdRef.current !== lesson.id;
-    syncScene(editor, lesson, visibleIds, reset);
-    lessonIdRef.current = lesson.id;
+    const reset = lessonIdRef.current !== effectiveLesson.id;
+    syncScene(editor, effectiveLesson, visibleIds, reset);
+    lessonIdRef.current = effectiveLesson.id;
     if (reset) {
       window.setTimeout(() => {
         frameCanvasScene(editor, 500);
       }, 60);
     }
-  }, [activeStep, isPresenting, lesson]);
+  }, [activeStep, isPresenting, effectiveLesson]);
+
+  // Interactive Arrow Hover Detection: inspect arrow under pointer with generous margin
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const pagePoint = editor.screenToPage({ x: screenX, y: screenY });
+
+    const arrowShape = editor.getShapeAtPoint(pagePoint, {
+      margin: 16,
+      hitInside: true,
+      filter: (s) => s.type === "arrow",
+    });
+
+    if (arrowShape) {
+      const meta = (arrowShape.meta as any) || {};
+      if (meta.chalkieConnection || meta.label || meta.from) {
+        setHoveredArrow({
+          x: screenX,
+          y: screenY,
+          label: meta.label || "Connection Flow",
+          from: meta.from || "Source",
+          to: meta.to || "Target",
+          type: meta.connectionType,
+        });
+        return;
+      }
+    }
+    setHoveredArrow(null);
+  }, []);
 
   // Camera framing and shape micro-animations during active teaching segment
   useEffect(() => {
@@ -487,28 +722,61 @@ export function ChalkCanvas({
       let pageX = b0.midX;
       let pageY = b0.midY;
 
-      if (activeSegment.action === "trace" && ids.length >= 2) {
-        const lastId = ids[ids.length - 1];
-        const bLast = editor.getShapePageBounds(lastId) || b0;
-        const rawT = Math.min(1, Math.max(0, elapsed / (duration * 0.88)));
-        const easeT = rawT < 0.5 ? 2 * rawT * rawT : -1 + (4 - 2 * rawT) * rawT;
-        pageX = b0.midX + (bLast.midX - b0.midX) * easeT;
-        pageY = b0.midY + (bLast.midY - b0.midY) * easeT;
-      } else if (activeSegment.action === "rotate" || activeSegment.action === "orbit") {
-        const radius = Math.max(b0.width, b0.height) * 0.45 + 16;
-        const angle = elapsed * 0.003;
-        pageX = b0.midX + Math.cos(angle) * radius;
-        pageY = b0.midY + Math.sin(angle) * radius;
-      } else if (activeSegment.action === "move" || activeSegment.action === "flow") {
-        const offset = Math.sin(elapsed * 0.004) * 18;
-        pageX = b0.midX + offset;
-        pageY = b0.midY;
+      const isDrawing = elapsed < 1400;
+      let currentLabel = activeObj?.label || activeSegment.title || activeSegment.action;
+
+      if (isDrawing) {
+        const progress = Math.min(1, elapsed / 1400); // 0 to 1
+        // Active Whiteboard Drawing: Laser traces the shape boundary on canvas!
+        let tx = b0.minX;
+        let ty = b0.minY;
+        if (progress < 0.25) {
+          const t = progress / 0.25;
+          tx = b0.minX + (b0.maxX - b0.minX) * t;
+          ty = b0.minY;
+        } else if (progress < 0.5) {
+          const t = (progress - 0.25) / 0.25;
+          tx = b0.maxX;
+          ty = b0.minY + (b0.maxY - b0.minY) * t;
+        } else if (progress < 0.75) {
+          const t = (progress - 0.5) / 0.25;
+          tx = b0.maxX - (b0.maxX - b0.minX) * t;
+          ty = b0.maxY;
+        } else {
+          const t = (progress - 0.75) / 0.25;
+          tx = b0.minX;
+          ty = b0.maxY - (b0.maxY - b0.minY) * t;
+        }
+        // Natural hand-drawn chalk jitter
+        const sketchJitter = Math.sin(progress * 28) * 2.5;
+        pageX = tx + sketchJitter;
+        pageY = ty + sketchJitter;
+        currentLabel = `Drawing ${activeObj?.label || "diagram"}`;
       } else {
-        // Natural teacher pointing hover around the prominent feature
-        const hoverX = Math.cos(elapsed * 0.0025) * 6;
-        const hoverY = Math.sin(elapsed * 0.003) * 5;
-        pageX = b0.maxX - 14 + hoverX;
-        pageY = b0.minY + 16 + hoverY;
+        // Explaining & Pointing Phase: Laser glides into shape center and hovers
+        if (activeSegment.action === "trace" && ids.length >= 2) {
+          const lastId = ids[ids.length - 1];
+          const bLast = editor.getShapePageBounds(lastId) || b0;
+          const rawT = Math.min(1, Math.max(0, (elapsed - 1400) / (duration * 0.75)));
+          const easeT = rawT < 0.5 ? 2 * rawT * rawT : -1 + (4 - 2 * rawT) * rawT;
+          pageX = b0.midX + (bLast.midX - b0.midX) * easeT;
+          pageY = b0.midY + (bLast.midY - b0.midY) * easeT;
+        } else if (activeSegment.action === "rotate" || activeSegment.action === "orbit") {
+          const radius = Math.max(b0.width, b0.height) * 0.45 + 16;
+          const angle = elapsed * 0.003;
+          pageX = b0.midX + Math.cos(angle) * radius;
+          pageY = b0.midY + Math.sin(angle) * radius;
+        } else if (activeSegment.action === "move" || activeSegment.action === "flow") {
+          const offset = Math.sin(elapsed * 0.004) * 18;
+          pageX = b0.midX + offset;
+          pageY = b0.midY;
+        } else {
+          // Natural teacher pointing hover around the center/feature
+          const hoverX = Math.cos(elapsed * 0.0025) * 6;
+          const hoverY = Math.sin(elapsed * 0.003) * 5;
+          pageX = b0.midX + hoverX;
+          pageY = b0.midY + hoverY;
+        }
       }
 
       const screenPos = editor.pageToViewport({ x: pageX, y: pageY });
@@ -525,9 +793,10 @@ export function ChalkCanvas({
         visible: true,
         x: screenPos.x,
         y: screenPos.y,
-        label,
+        label: currentLabel,
         action: activeSegment.action,
         targetBox,
+        isDrawing,
       });
 
       animationFrameId = requestAnimationFrame(updatePointer);
@@ -546,7 +815,12 @@ export function ChalkCanvas({
   }, [activeSegment, activeTargetId, isPresenting, lesson]);
 
   return (
-    <div className={`tldraw-shell relative w-full h-full overflow-hidden ${isPresenting ? "is-presenting" : ""}`} aria-label="Interactive lesson whiteboard">
+    <div
+      className={`tldraw-shell relative w-full h-full overflow-hidden ${isPresenting ? "is-presenting" : ""}`}
+      aria-label="Interactive lesson whiteboard"
+      onPointerMove={handlePointerMove}
+      onPointerLeave={() => setHoveredArrow(null)}
+    >
       <Tldraw
         shapeUtils={chalkShapeUtils}
         onMount={handleMount}
@@ -554,29 +828,60 @@ export function ChalkCanvas({
         components={{ StylePanel: null }}
       />
 
+      {/* Interactive Arrow Hover Tooltip Pill */}
+      {hoveredArrow && (
+        <div
+          className="absolute pointer-events-none z-50 transition-transform duration-75 ease-out"
+          style={{
+            left: `${hoveredArrow.x}px`,
+            top: `${hoveredArrow.y}px`,
+            transform: "translate(16px, -50%)",
+          }}
+        >
+          <div className="flex items-center gap-2.5 rounded-xl bg-[#121524]/95 px-3.5 py-2 text-xs backdrop-blur-md border border-cyan-400/40 shadow-[0_4px_24px_rgba(0,0,0,0.85),0_0_14px_rgba(6,182,212,0.3)] text-slate-200">
+            <div className="flex items-center justify-center w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 font-bold text-[11px]">
+              →
+            </div>
+            <div>
+              <div className="font-semibold text-white tracking-wide text-xs">
+                {hoveredArrow.label || "Connection Flow"}
+              </div>
+              <div className="text-[10px] text-cyan-300/80 font-mono flex items-center gap-1.5 mt-0.5">
+                <span>{hoveredArrow.from}</span>
+                <span className="text-slate-500">→</span>
+                <span>{hoveredArrow.to}</span>
+                {hoveredArrow.type && (
+                  <span className="ml-1 px-1.5 py-0.2 rounded bg-slate-800/80 text-[9px] uppercase tracking-wider text-slate-400">
+                    {hoveredArrow.type}
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Synchronized Live Teacher Presenter Cursor & Spotlight Halo */}
       {cursor.visible && (
         <div className="absolute inset-0 pointer-events-none overflow-hidden z-30">
-          {/* Target Spotlight Halo Frame */}
+          {/* Subtle Ambient Target Spotlight (non-blocking) */}
           {cursor.targetBox && (
             <div
-              className="absolute pointer-events-none rounded-2xl transition-all duration-300 border-2 border-dashed border-blue-500/80 bg-blue-500/5 shadow-[0_0_32px_rgba(37,99,235,0.28)] ring-4 ring-blue-400/20"
+              className={`absolute pointer-events-none rounded-2xl transition-all duration-300 ${
+                cursor.isDrawing
+                  ? "bg-amber-400/[0.04] ring-1 ring-amber-400/30"
+                  : "bg-blue-400/[0.03] ring-1 ring-blue-400/25 shadow-[0_0_24px_rgba(59,130,246,0.15)]"
+              }`}
               style={{
                 left: `${cursor.targetBox.x - 8}px`,
                 top: `${cursor.targetBox.y - 8}px`,
                 width: `${cursor.targetBox.w + 16}px`,
                 height: `${cursor.targetBox.h + 16}px`,
               }}
-            >
-              {/* Corner accents on the active target spotlight */}
-              <div className="absolute -top-1.5 -left-1.5 w-3.5 h-3.5 border-t-2 border-l-2 border-blue-600" />
-              <div className="absolute -top-1.5 -right-1.5 w-3.5 h-3.5 border-t-2 border-r-2 border-blue-600" />
-              <div className="absolute -bottom-1.5 -left-1.5 w-3.5 h-3.5 border-b-2 border-l-2 border-blue-600" />
-              <div className="absolute -bottom-1.5 -right-1.5 w-3.5 h-3.5 border-b-2 border-r-2 border-blue-600" />
-            </div>
+            />
           )}
 
-          {/* Teacher Presenter Stylus & Live Badge */}
+          {/* Sleek Presenter Laser Cursor (zero visual obstruction) */}
           <div
             className="absolute pointer-events-none transition-transform duration-75 ease-out"
             style={{
@@ -584,30 +889,41 @@ export function ChalkCanvas({
               willChange: "transform",
             }}
           >
-            {/* Luminous Red Laser Core with Glowing Halo */}
-            <div className="relative -translate-x-1/2 -translate-y-1/2">
-              <div className="w-8 h-8 rounded-full bg-red-500/25 animate-ping absolute inset-0" />
-              <div className="w-4 h-4 rounded-full bg-red-600 shadow-[0_0_20px_rgba(239,68,68,1)] border-2 border-white ring-2 ring-red-400 flex items-center justify-center">
-                <div className="w-1.5 h-1.5 rounded-full bg-white shadow-sm" />
+            <div className="relative">
+              {/* Laser Beacon Pulse at the arrow tip (0, 0) */}
+              <div className="absolute -top-1.5 -left-1.5 pointer-events-none">
+                <div
+                  className={`h-4 w-4 rounded-full animate-ping opacity-60 ${
+                    cursor.isDrawing ? "bg-amber-400" : "bg-rose-500"
+                  }`}
+                />
+                <div
+                  className={`absolute top-1 left-1 h-2 w-2 rounded-full border border-white ${
+                    cursor.isDrawing
+                      ? "bg-amber-300 shadow-[0_0_12px_#fbbf24]"
+                      : "bg-rose-500 shadow-[0_0_12px_#f43f5e]"
+                  }`}
+                />
               </div>
-            </div>
 
-            {/* Chalkie Teacher Badge with Dynamic Equalizer */}
-            <div className="absolute left-4 top-2.5 flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-900/95 text-white text-xs font-semibold shadow-2xl border border-white/20 backdrop-blur-md whitespace-nowrap animate-in fade-in zoom-in-95 duration-150">
-              <span className="text-sm">👨‍🏫</span>
-              <span className="text-amber-300 font-bold tracking-wide">Chalkie</span>
-              {cursor.label && (
-                <span className="max-w-[160px] truncate text-slate-100 font-medium pl-2 border-l border-slate-700">
-                  {cursor.label}
-                </span>
-              )}
-              {isSpeaking && (
-                <span className="flex items-center gap-0.5 ml-1" title="Speaking">
-                  <span className="w-1 h-3 bg-red-400 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                  <span className="w-1 h-4 bg-red-400 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                  <span className="w-1 h-2 bg-red-400 rounded-full animate-bounce" />
-                </span>
-              )}
+              {/* Presenter Arrow Cursor pointing directly at (0, 0) */}
+              <svg
+                width="22"
+                height="22"
+                viewBox="0 0 24 24"
+                fill="none"
+                className="drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] filter"
+                style={{ transform: "translate(0px, 0px)" }}
+              >
+                <path
+                  d="M4 3L11.5 21L14.8 13.8L22 10.5L4 3Z"
+                  fill={cursor.isDrawing ? "#f59e0b" : "#ef4444"}
+                  stroke="#ffffff"
+                  strokeWidth="1.8"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                />
+              </svg>
             </div>
           </div>
         </div>

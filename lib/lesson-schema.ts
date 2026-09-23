@@ -4,8 +4,8 @@ export const canvasColors = ["ink", "slate", "blue", "cyan", "violet", "orange",
 export type CanvasColor = typeof canvasColors[number];
 
 export const diagramTypes = ["mechanism", "spatial", "structure", "cycle", "process", "comparison", "timeline", "system", "quantitative"] as const;
-export const visualRoles = ["subject", "component", "environment", "container", "input", "output", "force", "annotation", "energy", "motion", "field", "path", "layer"] as const;
-export const visualShapeTypes = ["custom", "geo", "note", "frame"] as const;
+export const visualRoles = ["subject", "component", "environment", "container", "input", "output", "force", "annotation", "energy", "motion", "field", "path", "layer", "formula"] as const;
+export const visualShapeTypes = ["custom", "custom-chart", "custom-svg", "custom-template", "geo", "note", "frame"] as const;
 export const connectionArrowheads = ["none", "arrow", "triangle", "dot", "diamond", "bar"] as const;
 export const labelPlacements = ["inside", "below", "above", "left", "right", "none"] as const;
 export type LabelPlacement = typeof labelPlacements[number];
@@ -80,6 +80,14 @@ export const visualObjectSchema = z.object({
   width: z.coerce.number().default(180),
   height: z.coerce.number().default(120),
   parts: z.array(visualPartSchema).max(24).default([]),
+  props: z.record(z.any()).optional(),
+  chart: z.any().optional(),
+  svg: z.any().optional(),
+  template: z.any().optional(),
+  templateType: z.string().optional(),
+  templateData: z.any().optional(),
+  data: z.any().optional(),
+  content: z.any().optional(),
 });
 
 export const visualConnectionSchema = z.object({

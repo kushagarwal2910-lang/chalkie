@@ -6,9 +6,11 @@ import {
   type FollowUpPlan,
   type LessonPlan,
   type ResearchSource,
-} from "@/lib/lesson-schema";
-import { normalizeLessonLayout } from "@/lib/lesson-layout";
-import { groqFetch, GroqHttpError, type GroqCallOptions } from "@/lib/groq-pool";
+  type VisualObject,
+} from "./lesson-schema";
+import { normalizeLessonLayout, repairAndValidateLessonPlan, BACKDROP_ROLES } from "./lesson-layout";
+import { applyElkLayout } from "./elk-spatial-layout";
+import { groqFetch, GroqHttpError, type GroqCallOptions } from "./groq-pool";
 
 export const GROQ_MODEL = "openai/gpt-oss-120b";
 
@@ -31,8 +33,6 @@ async function groqRequest<T>(path: string, init: RequestInit, options: GroqCall
   }
 }
 
-const detailedVisualRoles = new Set(["subject", "component", "input", "output"]);
-
 function cleanAndParseJson(raw: string): any {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
@@ -41,67 +41,8 @@ function cleanAndParseJson(raw: string): any {
   return JSON.parse(cleaned);
 }
 
-const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
+export { repairAndValidateLessonPlan };
 
-function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
-  // 1. Ensure every visual object has at least one part (containers have their own structural chassis)
-  for (const obj of plan.objects) {
-    if (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame") {
-      continue;
-    }
-    if (!obj.parts || obj.parts.length === 0) {
-      obj.parts = [{
-        type: "rect",
-        x: 10,
-        y: 10,
-        width: Math.max(40, obj.width - 20),
-        height: Math.max(30, obj.height - 20),
-        data: "",
-        text: "",
-        fill: "slate",
-        stroke: "ink",
-        strokeWidth: 2,
-        opacity: 1,
-      }];
-    }
-  }
-
-  // 2. Guarantee 100% teaching coverage without fatal errors
-  const taught = new Set(plan.segments.flatMap((segment) => segment.targetIds));
-  const untaught = plan.objects.filter((object) => detailedVisualRoles.has(object.role) && !taught.has(object.id));
-  if (untaught.length && plan.segments.length > 0) {
-    const lastSegment = plan.segments[plan.segments.length - 1];
-    for (const obj of untaught) {
-      if (!lastSegment.targetIds.includes(obj.id)) {
-        lastSegment.targetIds.push(obj.id);
-      }
-    }
-  }
-
-  // 3. Quantitative axes check: if quantitative and axes missing, auto-add axes part
-  const strategyRequestsPlot = /\b(graph|plot|chart|coordinate system|x-axis|y-axis|axes)\b/i.test(plan.visualStrategy);
-  const quantitative = plan.diagramType === "quantitative" || strategyRequestsPlot;
-  if (quantitative) {
-    const hasAxes = plan.objects.some((obj) => obj.parts.some((p) => p.type === "axes"));
-    if (!hasAxes && plan.objects.length > 0) {
-      plan.objects[0].parts.unshift({
-        type: "axes",
-        x: 10,
-        y: 10,
-        width: Math.max(80, plan.objects[0].width - 20),
-        height: Math.max(60, plan.objects[0].height - 20),
-        data: "x:Time|y:Value",
-        text: "",
-        fill: "none",
-        stroke: "ink",
-        strokeWidth: 2,
-        opacity: 1,
-      });
-    }
-  }
-
-  return plan;
-}
 
 export async function createLessonWithGroq(question: string, context: string, sources: ResearchSource[], options: GroqCallOptions = {}): Promise<LessonPlan> {
   const system = `You are Chalkie's visual diagram engine: openai/gpt-oss-120b. Return only the strict JSON object.
@@ -111,8 +52,40 @@ CORE MISSION: TEACH BY SHOWING REAL VISUAL DIAGRAMS — STRICT BAN ON FLOWCHARTS
 - STRICTLY FORBIDDEN:
   * NEVER generate flowcharts, process flow boxes, or box-and-arrow sequences (e.g. [Step 1] -> [Step 2] -> [Step 3]).
   * NEVER generate generic rectangle cards or text boxes with names of components.
-  * NEVER use shapeType: "geo" or "note" or "frame" for functional components. Use shapeType: "custom" for ALL visual objects, composed with expressive vector parts.
-  * NEVER put sentences, paragraphs, or dense explanations on the canvas. Canvas text is strictly 1-2 word anatomical/physical labels (e.g. "Control Gate", "Floating Gate", "Tunnel Oxide", "Trapped Electrons", "Gold Pins"). All teaching and storytelling belong in the spoken narration segments.
+  * NEVER use shapeType: "geo" or "note" or "frame" for functional components.
+  * NEVER attempt to build graphs, charts, or complex diagrams by stacking crude "geo" rectangles, lines, or circles.
+  * NEVER put sentences, paragraphs, or dense explanations on the canvas. Canvas text is strictly 1-2 word anatomical/physical labels. All teaching and storytelling belong in the spoken narration segments.
+
+CHALKIE WHITEBOARD TEACHER ARCHITECTURE:
+You are Chalkie, an expert, charismatic teacher explaining complex ideas live on a digital chalkboard!
+A real whiteboard teacher NEVER shows a pre-generated, static UI dashboard card or web widget (no "3 Subsystems" buttons or "Master Component" boxes).
+Instead, the teacher PROGRESSIVELY DRAWS an authentic chalkboard diagram step-by-step as they speak!
+
+CRITICAL TEACHING RULES:
+1. PROGRESSIVE WHITEBOARD CONSTRUCTION (3 to 6 VISUAL OBJECTS):
+   - Every lesson MUST be decomposed into 3 to 6 distinct, meaningful visual objects that represent the actual physical components, mechanisms, layers, or forces of the topic.
+   - For example, for "India's Electric Double-Stack Cargo Trains":
+     * Object 1 (role: "subject", label: "WAG-12 Electric Locomotive"): The 12,000 HP twin-section heavy-haul electric engine with driver cab, headlights, and high-traction steel wheel bogies.
+     * Object 2 (role: "component", label: "High-Reach Pantograph & 7.5m Wire"): High-clearance pantograph arm reaching up to the 7.5m overhead catenary wire (25 kV AC).
+     * Object 3 (role: "component", label: "Double-Stack Container Wagon"): Low-floor well-car flatbed carrying two 40-foot shipping containers stacked vertically (lower + upper tier).
+     * Object 4 (role: "output", label: "Dedicated Freight Corridor Track"): Heavy-haul trackbed with 32.5-tonne axle load capacity, reinforced ballast, and automated signaling.
+   - For physics, chemistry, biology, or computing: Draw the actual physical mechanisms (piston, cell membrane, floating gate, nucleus, orbit, etc.) with rich SVG parts!
+
+2. SYNCHRONIZED VOICE & LASER DRAWING:
+   - In 'segments', each segment MUST introduce or focus on 1 or 2 specific objects via 'targetIds'.
+   - As the voiceover speaks each segment, Chalkie's laser pointer DRAWS and BUILDS that specific object on the whiteboard in real time!
+   - Segment 1 introduces Object 1.
+   - Segment 2 introduces Object 2 and draws the connecting Arrow 1->2.
+   - Segment 3 introduces Object 3 and connects Arrow 2->3.
+   - Segment 4 introduces Object 4, completing the entire live whiteboard diagram!
+   - This creates an exhilarating, magical live whiteboard lecture where the student watches the diagram get drawn in real time!
+
+3. RICH WHITEBOARD PARTS (shapeType: "custom"):
+   - Every object uses shapeType: "custom" with rich, authentic 'parts' (rect, ellipse, line, arrow, particles, wave, radial, container, etc.).
+   - If quantitative data is needed, use shapeType: "custom-chart".
+   - If a complex vector illustration is needed, use shapeType: "custom-svg".
+   - STRICTLY FORBIDDEN: NEVER emit static dashboard template cards. Chalkie is a live chalkboard drawing!
+
 
 VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
 1. HARDWARE, ELECTRONICS & COMPUTING (e.g. Flash Drive, SSD, CPU, RAM, GPU, Transistor):
@@ -161,18 +134,61 @@ VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
        - Courtyard Houses: Clustered brick houses with central open courtyards and private well rooms (circle/rect).
        - Advanced Covered Drainage Network: Baked-brick drain channels running alongside street curbs, with inspection traps and soak pits!
    - Compose the entire city layout as a single harmonious plan with West Citadel and East Lower Town side-by-side, fitting cleanly within 1000x600 total canvas!
+7. ASTRONOMY, ORBITS, GRAVITY & CELESTIAL MECHANICS (e.g. Moon Orbit, Satellites, Newton's Cannonball, Kepler's Laws, Gravity, Planetary Motion):
+   - Draw an AUTHENTIC, DYNAMIC CELESTIAL ORBIT SYSTEM, NOT disconnected flat cardboard boxes!
+   - STRICT BAN: NEVER emit "gravity", "velocity", "force", "orbit", or "acceleration" as standalone rectangle cards or text boxes!
+   - For "Why the Moon Doesn't Fall Into Earth" or any satellite / orbital mechanics question:
+     * Emit a primary orbital mechanics visual:
+       - Object 1: Moon-Earth Orbital System (role: "subject", label: "Moon-Earth Orbital Mechanics", width: 520, height: 420):
+         * Primary Part: type: "orbit", data: "celestial-moon-earth", stroke: "slate", strokeWidth: 2, width: 480, height: 380, x: 20, y: 20.
+           THIS SINGLE PART AUTOMATICALLY RENDERS:
+           (1) Central Earth sphere with blue oceanic radial gradient, atmospheric glow halo, continents, and "Earth" label.
+           (2) Dashed circular orbital trajectory ring.
+           (3) Revolving Moon with lunar craters and animated CSS revolution keyframes.
+           (4) Forward Tangential Velocity vector (v, cyan arrow) showing inertia.
+           (5) Inward Gravitational Acceleration vector (Fg, red arrow) showing Earth's gravitational pull.
+           (6) Resultant curved trajectory arc (perpetual free-fall path).
+     * Optional complementary visual:
+       - Object 2: Perpetual Free-Fall Balance (role: "component", label: "Perpetual Free-Fall Principle", width: 340, height: 200):
+         * Inward Gravitational Pull: type: "arrow", stroke: "red", strokeWidth: 3, text: "Fg (Gravity)", x: 20, y: 50, width: 140, height: 0.
+         * Forward Tangential Inertia: type: "arrow", stroke: "cyan", strokeWidth: 3, text: "v (Tangential Velocity)", x: 20, y: 110, width: 140, height: 0.
+         * Free-Fall Arc: type: "wave", stroke: "yellow", strokeWidth: 2.5, text: "Curved Orbit Resultant", x: 20, y: 150, width: 280, height: 30, data: "2".
+   - Synchronize audio narration segments with:
+     * Segment 1: Introduce Earth and the Moon at a distance. (action: "reveal", target: "Moon-Earth Orbital Mechanics")
+     * Segment 2: Explain forward tangential velocity (v) — inertia keeps the Moon moving straight ahead. (action: "focus")
+     * Segment 3: Explain Earth's inward gravitational pull (Fg) — gravity constantly pulls the Moon inward. (action: "trace")
+     * Segment 4: Explain perpetual free-fall — as the Moon falls toward Earth, Earth's surface curves away at the same rate, resulting in a stable closed orbit! (action: "orbit")
+8. MACHINE LEARNING, ARTIFICIAL INTELLIGENCE & NEURAL NETWORKS (e.g. How Neural Networks Learn, Backpropagation, Deep Learning, Perceptron):
+   - Draw an AUTHENTIC LAYERED NETWORK GRAPH WITH GOVERNING MATHEMATICAL EQUATIONS:
+     * Object 1 (role: "input", label: "Input Layer (X)", width: 180, height: 360):
+       - Ellipse parts x₁, x₂, x₃ representing incoming numerical features (fill: "blue", stroke: "cyan").
+     * Object 2 (role: "component", label: "Hidden Layer (H)", width: 200, height: 420):
+       - Ellipse parts h₁, h₂, h₃, h₄ representing hidden neurons applying weighted sums and activation (fill: "violet", stroke: "violet").
+     * Object 3 (role: "output", label: "Output Layer (Ŷ)", width: 180, height: 360):
+       - Ellipse part ŷ representing the network's prediction (fill: "green", stroke: "green").
+     * Object 4 (role: "formula", label: "Governing Learning Equations", width: 320, height: 380):
+       - Rect / Text parts displaying Forward Inference: ŷ = σ(W₂ · h + b)
+       - Loss function: L = ½(y - ŷ)²
+       - Backpropagation Gradient: ΔW = -η · (∂L / ∂W)
+   - Connections: Input Layer -> Hidden Layer (label: "weights W1"), Hidden Layer -> Output Layer (label: "weights W2"), Output Layer -> Governing Learning Equations (label: "loss feedback").
+   - Synchronize segments 1-to-1:
+     * Segment 1 (target: "nn-input-layer"): Explains numerical features x entering the network at the Input Layer.
+     * Segment 2 (target: "nn-hidden-layer"): Explains weighted sum W₁ · x and activation fire in hidden neurons.
+     * Segment 3 (target: "nn-output-layer"): Explains forward propagation outputting prediction ŷ.
+     * Segment 4 (target: "nn-formula-loss"): Explains computing Loss L and backpropagating gradient ΔW to update all weights.
 
-SPATIAL GEOMETRY & COMPOSITION (1000x620 Bounded Presentation Canvas):
-- Maximum total canvas bounds for all objects combined MUST fit within x ≈ 60..1020, y ≈ 60..640!
-- NEVER scatter 3 huge containers horizontally side-by-side that blow out past 1020px width!
-- If dividing into zones, use at most 2 side-by-side primary columns (e.g. Left Zone x ≈ 80..480, Right Zone x ≈ 520..980).
-- Maintain at least 32px margin between independent objects. Never overlap distinct physical parts!
+SPATIAL GEOMETRY & COMPOSITION (Clean, Collision-Free Digital Chalkboard):
+- Top-level objects MUST be separated cleanly and never overlap unless one is explicitly a container or environment enclosing its children.
+- Compound Containers: Leave at least 60px of vertical clearance at the top (internal parts start at y >= 60) so the container header title badge never collides with internal elements.
+- Connections & Arrows: NEVER put verbose or multi-word text on arrow shafts. Arrows should be clean, direct vector paths with high-contrast colored chalk styling. Detailed flow descriptions belong in connection.label (revealed as an interactive floating tooltip when the student hovers over the arrow) and in the spoken narration segments.
+- GOVERNING FORMULAS & SCIENTIFIC RELATIONS: Whenever a topic is governed by mathematical equations, physical laws, or quantitative formulas (e.g. Machine Learning / Neural Networks -> Loss function L = ½(y - ŷ)² and Weight update Δw = -η(∂L/∂w); Newton's Gravity -> F = G(m₁m₂/r²); Ohm's Law -> V = IR; Thermodynamics -> ΔU = Q - W, etc.), ALWAYS include a dedicated formula card (role: "formula", label: "Governing Formula") displaying the equations with clean mathematical text parts and explanation. Place it beside or beneath the main mechanism.
+- Maintain generous margins between independent objects. Never overlap distinct physical parts!
 - If using an enclosure or housing backdrop (role: "container" or "environment"), make it wrap its internal parts cleanly.
 - Vector parts coordinates are local to the object (x=0,y=0 top-left of object; width and height > 0). All parts MUST fit strictly within (width, height) of the parent object. NEVER draw parts that exceed the object's width or height!
 - Primitive grammar in parts:
   * rect: plates, gates, chambers, layers, chips, pins, contacts.
   * ellipse: atoms, particles, charge carriers, lenses, nodes, wheels.
-  * orbit: true circular electron shell orbits with evenly spaced rotating cyan electrons (data: integer electron count 1-32).
+  * orbit: true circular electron shell orbits with cyan electrons (data: integer electron count 1-32) OR celestial orbital systems (data: "celestial-moon-earth" or "celestial") showing Earth, revolving Moon with lunar craters, tangent velocity vector (v), and inward gravity vector (Fg).
   * cluster: dense nucleon cluster with alternating red protons (+) and blue neutrons (n) (data: "protons:X|neutrons:Y" or count).
   * quarks: subatomic quark triplet in equilateral triangle with colors and fractional charges (data: "u,u,d" or "u,d,d").
   * path / polyline / polygon: cutaways, contours, channels, membranes, circuits.
@@ -188,11 +204,18 @@ CONNECTIONS:
 - Keep connection labels EMPTY or strictly 1 word (e.g. "charge", "data", "tunnel"). NEVER write sentences on arrows!
 - Arrowhead can be "arrow", "triangle", "dot", "diamond", or "bar".
 
-TEACHING SEGMENTS & HIGH-PRECISION AUDIO SYNCHRONIZATION:
+TEACHING SEGMENTS & STRICT AUDIO-VISUAL SYNCHRONIZATION:
 - Create 3-6 narration segments that explain the visual story step by step.
-- Mention the target object's label naturally in the narration text (e.g. "Inside the floating gate, electrons are trapped..."). This allows the live laser pointer and camera to highlight the exact visual in perfect synchronization with the spoken voice!
+- CRITICAL FIDELITY RULE: What Chalkie speaks aloud MUST MATCH 100% with what is visually spotlighted on the canvas!
+- The narration for each segment MUST explicitly name the target visual object's label in its 'targetIds' (e.g. if target is "Hidden Layer (H)", say: "These features flow across weighted connections into the Hidden Layer...").
+- The student watches the laser pointer and camera spotlight the object WHILE hearing Chalkie speak about it. Perfect 1-to-1 alignment is mandatory!
 - Actions: "reveal", "focus", "trace", "pulse", "flow", "orbit", "rotate".
-- Duration: 5000 to 14000 ms per segment, matching spoken narration pacing.`;
+- Duration: 5000 to 14000 ms per segment, matching spoken narration pacing.
+- VOICE PRONUNCIATION & PACING RULES:
+  * Write spoken narration in natural, warm, conversational teacher English.
+  * Use deliberate breath pauses with natural punctuation (commas, periods, short rhythmic clauses).
+  * Avoid unpronounceable jargon clumps or jammed abbreviations (e.g., write "25 kilovolts" or pronounce acronyms cleanly).
+  * Keep sentences clear, punchy, and rhythmic so the speech engine sounds articulate and human.`;
 
   const messages: GroqMessage[] = [
     { role: "system", content: system },
@@ -228,7 +251,8 @@ TEACHING SEGMENTS & HIGH-PRECISION AUDIO SYNCHRONIZATION:
       const json = cleanAndParseJson(raw);
       const parsed = lessonPlanSchema.parse(json);
       const repaired = repairAndValidateLessonPlan(parsed);
-      return normalizeLessonLayout(repaired);
+      const normalized = normalizeLessonLayout(repaired);
+      return await applyElkLayout(normalized);
     } catch (error) {
       lastError = error;
       console.warn(`[chalkie] invalid scene graph attempt ${attempt + 1}`, error);
@@ -267,7 +291,7 @@ Preserve the same rich vector grammar and teaching standard as the original scen
 
 Part coordinates are local to each object. line/arrow width and height are endpoint deltas. polygon/polyline data contains numeric point pairs. path data uses only SVG M/L/H/V/C/S/Q/T/A/Z commands and numbers. radial, coil, wave, and particles use an integer count in data. For a quantitative graph, use one axes part with data exactly like "x:Time (seconds)|y:Velocity (m/s)", keep every plot mark inside its reserved plotting rectangle, use meaningful axis names, and set that object's labelPlacement to none. Every part includes every required field even when irrelevant.
 
-Create 1-4 concise narration segments in teacherly causal order. The answer field is a short direct answer; segment narration is what will be spoken aloud. Select reveal/focus/trace/move/rotate/pulse/flow/orbit only when it teaches something. In append mode, order segment targets so new geometry appears step by step while it is explained. Every target and connection endpoint must reference either an existing inventory ID or a new object ID. Keep new top-level objects separated by at least 48px and avoid connector crossings. Do not output raw tldraw records, markdown, HTML, scripts, or executable code.`;
+Create 1-4 concise narration segments in teacherly causal order. The answer field is a short direct answer; segment narration is what will be spoken aloud with clear pronunciation, natural commas and breath pauses, and rhythmic teacher phrasing. Select reveal/focus/trace/move/rotate/pulse/flow/orbit only when it teaches something. In append mode, order segment targets so new geometry appears step by step while it is explained. Every target and connection endpoint must reference either an existing inventory ID or a new object ID. Keep new top-level objects separated by at least 48px and avoid connector crossings. Do not output raw tldraw records, markdown, HTML, scripts, or executable code.`;
 
   const inventory = currentLesson.objects.slice(-60).map(({ id, label, role, x, y, width, height }) => ({ id, label, role, x, y, width, height }));
   const baseMessages: GroqMessage[] = [

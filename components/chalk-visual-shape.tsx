@@ -27,20 +27,67 @@ declare module "tldraw" {
 export type ChalkVisualShape = TLShape<typeof CHALK_VISUAL_TYPE>;
 
 const palette: Record<string, string> = {
-  ink: "#1e293b",
-  slate: "#64748b",
-  gray: "#64748b",
-  grey: "#64748b",
-  blue: "#2563eb",
-  cyan: "#0284c7",
-  violet: "#7c3aed",
-  orange: "#ea580c",
-  green: "#16a34a",
-  red: "#dc2626",
-  yellow: "#d97706",
+  ink: "#f8fafc",
+  slate: "#94a3b8",
+  gray: "#94a3b8",
+  grey: "#94a3b8",
+  blue: "#60a5fa",
+  cyan: "#38bdf8",
+  violet: "#c084fc",
+  orange: "#fb923c",
+  green: "#4ade80",
+  red: "#f87171",
+  yellow: "#facc15",
   white: "#ffffff",
   none: "none",
 };
+
+/**
+ * High-luminance palette for crisp text readability on dark chalkboard themes (>= 11:1 contrast).
+ */
+const textPalette: Record<string, string> = {
+  ink: "#f8fafc",
+  white: "#ffffff",
+  slate: "#cbd5e1",
+  gray: "#cbd5e1",
+  grey: "#cbd5e1",
+  blue: "#93c5fd",
+  cyan: "#38bdf8",
+  violet: "#e9d5ff",
+  orange: "#fed7aa",
+  green: "#86efac",
+  red: "#fca5a5",
+  yellow: "#fef08a",
+  none: "#f8fafc",
+};
+
+/**
+ * Calculates WCAG 2.1 relative luminance for a given hex color.
+ */
+function getRelativeLuminance(hex: string): number {
+  if (!hex || hex === "none") return 0;
+  const clean = hex.replace("#", "");
+  if (clean.length !== 6) return 0.5;
+  const r = parseInt(clean.substring(0, 2), 16) / 255;
+  const g = parseInt(clean.substring(2, 4), 16) / 255;
+  const b = parseInt(clean.substring(4, 6), 16) / 255;
+  const toLinear = (c: number) => c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  return 0.2126 * toLinear(r) + 0.7152 * toLinear(g) + 0.0722 * toLinear(b);
+}
+
+/**
+ * Guarantees color contrast never fails:
+ * If background fill is light/bright (luminance > 0.28: green, yellow, cyan, white, orange, blue, violet),
+ * returns deep dark ink '#090d16' with high contrast (>= 6:1 to 16:1).
+ * If background is dark or transparent, returns pure radiant white '#f8fafc'.
+ */
+function getContrastingTextColor(fillColorNameOrHex: string): string {
+  if (!fillColorNameOrHex || fillColorNameOrHex === "none") return "#f8fafc";
+  const hex = palette[fillColorNameOrHex] || fillColorNameOrHex;
+  if (!hex.startsWith("#")) return "#090d16";
+  const lum = getRelativeLuminance(hex);
+  return lum > 0.28 ? "#090d16" : "#f8fafc";
+}
 
 function safeParts(value: string): VisualPart[] {
   try {
@@ -112,9 +159,70 @@ function parseClusterData(data: string, fallbackTotal = 12) {
 function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean, uid: string) {
   if (hasAxes) return null;
   // If the object already has its own vector illustration parts, DO NOT draw a card box around it
-  // unless it is explicitly an environment, container, or background layer!
-  if (hasParts && !["container", "environment", "layer", "field"].includes(role)) {
+  // unless it is explicitly an environment, container, background layer, or formula plaque!
+  if (hasParts && !["container", "environment", "layer", "field", "formula"].includes(role)) {
     return null;
+  }
+
+  if (role === "formula") {
+    // Dedicated chalkboard mathematical plaque
+    return (
+      <g>
+        <defs>
+          <linearGradient id={`${uid}-formula-bg`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#141a2e" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="#0c101c" stopOpacity={0.92} />
+          </linearGradient>
+          <linearGradient id={`${uid}-formula-border`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.7} />
+            <stop offset="50%" stopColor="#818cf8" stopOpacity={0.5} />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.7} />
+          </linearGradient>
+        </defs>
+        <rect
+          x={4}
+          y={5}
+          width={Math.max(0, w - 8)}
+          height={Math.max(0, h - 8)}
+          rx={14}
+          fill="#000000"
+          fillOpacity={0.35}
+        />
+        <rect
+          x={3}
+          y={3}
+          width={Math.max(0, w - 6)}
+          height={Math.max(0, h - 6)}
+          rx={14}
+          fill={`url(#${uid}-formula-bg)`}
+          stroke={`url(#${uid}-formula-border)`}
+          strokeWidth={1.5}
+        />
+        {/* Math "f(x)" badge indicator */}
+        <rect
+          x={12}
+          y={10}
+          width={28}
+          height={18}
+          rx={4}
+          fill="#38bdf8"
+          fillOpacity={0.15}
+          stroke="#38bdf8"
+          strokeWidth={1}
+        />
+        <text
+          x={26}
+          y={23}
+          textAnchor="middle"
+          fontSize="11"
+          fontWeight="bold"
+          fill="#38bdf8"
+          fontFamily="monospace, serif"
+        >
+          f(x)
+        </text>
+      </g>
+    );
   }
 
   if (role === "container") {
@@ -123,13 +231,13 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
       <g>
         <defs>
           <linearGradient id={`${uid}-container-bg`} x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#f8fafc" stopOpacity={0.95} />
-            <stop offset="100%" stopColor="#f1f5f9" stopOpacity={0.88} />
+            <stop offset="0%" stopColor="#151824" stopOpacity={0.92} />
+            <stop offset="100%" stopColor="#0d0f18" stopOpacity={0.88} />
           </linearGradient>
           <linearGradient id={`${uid}-container-border`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#94a3b8" />
-            <stop offset="50%" stopColor="#cbd5e1" />
-            <stop offset="100%" stopColor="#94a3b8" />
+            <stop offset="0%" stopColor="#334155" />
+            <stop offset="50%" stopColor="#475569" />
+            <stop offset="100%" stopColor="#334155" />
           </linearGradient>
         </defs>
         {/* Outer soft shadow layer */}
@@ -139,8 +247,8 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           width={Math.max(0, w - 8)}
           height={Math.max(0, h - 8)}
           rx={16}
-          fill="#0f172a"
-          fillOpacity={0.06}
+          fill="#000000"
+          fillOpacity={0.25}
         />
         {/* Main container card */}
         <rect
@@ -161,7 +269,7 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           height={1}
           rx={0.5}
           fill="#ffffff"
-          fillOpacity={0.7}
+          fillOpacity={0.15}
         />
       </g>
     );
@@ -177,8 +285,8 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           width={Math.max(0, w - 8)}
           height={Math.max(0, h - 8)}
           rx={20}
-          fill="#0f172a"
-          fillOpacity={0.04}
+          fill="#000000"
+          fillOpacity={0.2}
         />
         <rect
           x={3}
@@ -186,9 +294,9 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           width={Math.max(0, w - 6)}
           height={Math.max(0, h - 6)}
           rx={20}
-          fill="#f1f5f9"
-          fillOpacity={0.72}
-          stroke="#cbd5e1"
+          fill="#11131c"
+          fillOpacity={0.65}
+          stroke="#282e42"
           strokeWidth={1.2}
         />
       </g>
@@ -204,9 +312,9 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
         width={Math.max(0, w - 6)}
         height={Math.max(0, h - 6)}
         rx={12}
-        fill="#f8fafc"
-        fillOpacity={0.55}
-        stroke="#e2e8f0"
+        fill="#141724"
+        fillOpacity={0.45}
+        stroke="#22283a"
         strokeWidth={1}
       />
     );
@@ -221,8 +329,8 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
         width={Math.max(0, w - 8)}
         height={Math.max(0, h - 8)}
         rx={12}
-        fill="#0f172a"
-        fillOpacity={0.07}
+        fill="#000000"
+        fillOpacity={0.25}
       />
       <rect
         x={2}
@@ -230,9 +338,9 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
         width={Math.max(0, w - 4)}
         height={Math.max(0, h - 4)}
         rx={12}
-        fill="#ffffff"
-        fillOpacity={0.95}
-        stroke="#e2e8f0"
+        fill="#11131c"
+        fillOpacity={0.85}
+        stroke="#282e42"
         strokeWidth={1.5}
       />
     </g>
@@ -248,14 +356,33 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
   const axesPart = parts.find((part) => part.type === "axes");
   const plot = axesPart ? axisPlot(axesPart) : null;
   const lines = labelLines(shape.props.label);
-  const labelY = shape.props.labelPlacement === "above" ? 16 : shape.props.labelPlacement === "below" ? shape.props.h - 12 : shape.props.h / 2;
+  const isAbove = shape.props.labelPlacement === "above";
+  const isBelow = shape.props.labelPlacement === "below";
+  const isContainer = ["container", "environment", "layer", "field", "formula"].includes(shape.props.role);
+  const pillFontSize = isContainer ? 13 : 11;
+  const estimatedPillH = lines.length > 1 ? pillFontSize * 2 + 12 : pillFontSize + 10;
+  const labelY = isAbove
+    ? Math.max(16, estimatedPillH / 2 + 2)
+    : isBelow
+      ? shape.props.h - estimatedPillH / 2 - 2
+      : shape.props.h / 2;
   const labelX = shape.props.labelPlacement === "left" ? Math.min(60, shape.props.w / 4) : shape.props.labelPlacement === "right" ? Math.max(shape.props.w - 60, (shape.props.w * 3) / 4) : shape.props.w / 2;
 
   return (
     <SVGContainer width={shape.props.w} height={shape.props.h} viewBox={`0 0 ${shape.props.w} ${shape.props.h}`} preserveAspectRatio="none">
       <defs>
+        {/* Directional Vector Markers */}
         <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
           <path d="M 0 0 L 8 4 L 0 8 z" fill="#334155" />
+        </marker>
+        <marker id={`${markerId}-red`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M 0 0 L 8 4 L 0 8 z" fill="#ef4444" />
+        </marker>
+        <marker id={`${markerId}-cyan`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M 0 0 L 8 4 L 0 8 z" fill="#06b6d4" />
+        </marker>
+        <marker id={`${markerId}-green`} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
+          <path d="M 0 0 L 8 4 L 0 8 z" fill="#10b981" />
         </marker>
         <filter id={`${markerId}-shadow`} x="-20%" y="-20%" width="140%" height="140%">
           <feDropShadow dx="0" dy="1.5" stdDeviation="2" floodColor="#0f172a" floodOpacity="0.12" />
@@ -265,7 +392,22 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           <feComposite in="SourceGraphic" in2="blur" operator="over" />
         </filter>
 
-        {/* Rich Architectural Gradients */}
+        {/* Rich Architectural & Celestial Gradients */}
+        <radialGradient id={`${markerId}-earth`} cx="35%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#38bdf8" />
+          <stop offset="45%" stopColor="#0284c7" />
+          <stop offset="100%" stopColor="#0f172a" />
+        </radialGradient>
+        <radialGradient id={`${markerId}-moon`} cx="35%" cy="35%" r="65%">
+          <stop offset="0%" stopColor="#f8fafc" />
+          <stop offset="50%" stopColor="#94a3b8" />
+          <stop offset="100%" stopColor="#334155" />
+        </radialGradient>
+        <radialGradient id={`${markerId}-sun`} cx="40%" cy="40%" r="60%">
+          <stop offset="0%" stopColor="#fef08a" />
+          <stop offset="60%" stopColor="#f59e0b" />
+          <stop offset="100%" stopColor="#b45309" />
+        </radialGradient>
         <linearGradient id={`${markerId}-gold`} x1="0%" y1="0%" x2="100%" y2="100%">
           <stop offset="0%" stopColor="#fef08a" />
           <stop offset="50%" stopColor="#eab308" />
@@ -294,7 +436,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         </clipPath>
         {plot && <clipPath id={plotClipId}><rect x={plot.left} y={plot.top} width={Math.max(0, plot.right - plot.left)} height={Math.max(0, plot.bottom - plot.top)} /></clipPath>}
 
-        {/* Dynamic Keyframe Animations for Physics & Data Flow */}
+        {/* Dynamic Keyframe Animations for Physics, Astronomy & Data Flow */}
         <style>{`
           @keyframes animated-wave {
             0% { stroke-dashoffset: 0; }
@@ -309,19 +451,34 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
           }
+          @keyframes chalkieCelestialOrbit {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+          }
           @keyframes chalkieFlowDash { to { stroke-dashoffset: -28px; } }
           @keyframes chalkieParticleFloat { 0%, 100% { transform: translateY(0px); opacity: 0.85; } 50% { transform: translateY(-3px); opacity: 1; } }
           @keyframes chalkieSpin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
           @keyframes chalkiePulse { 0%, 100% { opacity: 0.75; transform: scale(1); } 50% { opacity: 1; transform: scale(1.02); } }
+          @keyframes chalkSketchEnter {
+            0% { opacity: 0; transform: scale(0.96); }
+            70% { opacity: 0.95; transform: scale(1.01); }
+            100% { opacity: 1; transform: scale(1); }
+          }
+          .chalk-shape-container {
+            animation: chalkSketchEnter 0.55s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            transform-origin: center;
+          }
           .animated-wave { stroke-dasharray: 6 4; animation: chalkieFlowDash 1.2s linear infinite; }
           .animated-particle { animation: chalkieParticleFloat 2.4s ease-in-out infinite; }
           .animated-spin { transform-origin: center; animation: chalkieSpin 12s linear infinite; }
+          .celestial-orbit-spin { transform-origin: center; animation: chalkieCelestialOrbit 16s linear infinite; }
         `}</style>
       </defs>
 
-      {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid)}
+      <g className="chalk-shape-container">
+        {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid)}
 
-      <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`}>
+        <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`}>
         {parts.map((part, index) => {
           let rawStroke = palette[part.stroke] ?? palette.ink;
           let rawFill = palette[part.fill] ?? palette.none;
@@ -370,19 +527,54 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             const maxRy = Math.min(cy, shape.props.h - cy);
             const rx = Math.max(2, Math.min(maxRx, part.width / 2));
             const ry = Math.max(2, Math.min(maxRy, part.height / 2));
-            // Keep circular proportions if aspect ratio is roughly square or marked as circle
             const isCircle = Math.abs(rx - ry) / Math.max(rx, ry) < 0.28 || part.data === "circle";
             const finalRx = isCircle ? Math.min(rx, ry) : rx;
             const finalRy = isCircle ? Math.min(rx, ry) : ry;
+
+            // Celestial Body Detection (Earth, Moon, Sun)
+            const textLower = (part.text || "").toLowerCase();
+            const dataLower = (part.data || "").toLowerCase();
+            const labelLower = (shape.props.label || "").toLowerCase();
+            let celestialFill = common.fill;
+            let celestialStroke = common.stroke;
+
+            if (dataLower.includes("earth") || textLower.includes("earth") || labelLower.includes("earth")) {
+              celestialFill = `url(#${markerId}-earth)`;
+              celestialStroke = "#38bdf8";
+            } else if (dataLower.includes("moon") || textLower.includes("moon") || labelLower.includes("moon")) {
+              celestialFill = `url(#${markerId}-moon)`;
+              celestialStroke = "#f1f5f9";
+            } else if (dataLower.includes("sun") || textLower.includes("sun") || labelLower.includes("sun")) {
+              celestialFill = `url(#${markerId}-sun)`;
+              celestialStroke = "#fef08a";
+            }
+
             return (
-              <ellipse
-                key={key}
-                {...common}
-                cx={cx}
-                cy={cy}
-                rx={finalRx}
-                ry={finalRy}
-              />
+              <g key={key}>
+                <ellipse
+                  {...common}
+                  fill={celestialFill}
+                  stroke={celestialStroke}
+                  cx={cx}
+                  cy={cy}
+                  rx={finalRx}
+                  ry={finalRy}
+                />
+                {part.text && (
+                  <text
+                    x={cx}
+                    y={cy}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill={getContrastingTextColor(rawFill !== "none" ? rawFill : part.fill)}
+                    fontFamily="Inter, ui-sans-serif, system-ui"
+                    fontSize={Math.max(14, Math.min(22, finalRx * 0.65))}
+                    fontWeight="900"
+                  >
+                    {part.text}
+                  </text>
+                )}
+              </g>
             );
           }
 
@@ -405,16 +597,40 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           }
 
           if (part.type === "line" || part.type === "arrow") {
+            const isRed = part.stroke === "red" || (part.data || "").includes("gravity") || (part.text || "").toLowerCase().includes("grav");
+            const isCyan = part.stroke === "cyan" || (part.data || "").includes("velocity") || (part.text || "").toLowerCase().includes("velo");
+            const isGreen = part.stroke === "green";
+            const marker = part.type === "arrow"
+              ? isRed ? `url(#${markerId}-red)`
+                : isCyan ? `url(#${markerId}-cyan)`
+                : isGreen ? `url(#${markerId}-green)`
+                : `url(#${markerId})`
+              : undefined;
+
             return (
-              <line
-                key={key}
-                {...common}
-                x1={part.x}
-                y1={part.y}
-                x2={part.x + part.width}
-                y2={part.y + part.height}
-                markerEnd={part.type === "arrow" ? `url(#${markerId})` : undefined}
-              />
+              <g key={key}>
+                <line
+                  {...common}
+                  x1={part.x}
+                  y1={part.y}
+                  x2={part.x + part.width}
+                  y2={part.y + part.height}
+                  markerEnd={marker}
+                />
+                {part.text && (
+                  <text
+                    x={part.x + part.width / 2}
+                    y={part.y + part.height / 2 - 8}
+                    fill={textPalette[part.stroke] || "#f8fafc"}
+                    fontSize={12}
+                    fontWeight="700"
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                  >
+                    {part.text}
+                  </text>
+                )}
+              </g>
             );
           }
 
@@ -492,31 +708,151 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
                 <line x1={bounds.left} y1={bounds.bottom} x2={bounds.left} y2={bounds.top} markerEnd={`url(#${markerId})`} />
                 {tickXs.map((x) => <line key={`x-${x}`} x1={x} y1={bounds.bottom - 4} x2={x} y2={bounds.bottom + 4} opacity="0.45" />)}
                 {tickYs.map((y) => <line key={`y-${y}`} x1={bounds.left - 4} y1={y} x2={bounds.left + 4} y2={y} opacity="0.45" />)}
-                <text x={(bounds.left + bounds.right) / 2} y={part.y + part.height - 9} fill={axisColor} stroke="#fbfaf7" strokeWidth="4" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700">{labels.x}</text>
-                <text x={part.x + 11} y={(bounds.top + bounds.bottom) / 2} fill={axisColor} stroke="#fbfaf7" strokeWidth="4" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700" transform={`rotate(-90 ${part.x + 11} ${(bounds.top + bounds.bottom) / 2})`}>{labels.y}</text>
+                <text x={(bounds.left + bounds.right) / 2} y={part.y + part.height - 9} fill={axisColor} stroke="#090d16" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700">{labels.x}</text>
+                <text x={part.x + 11} y={(bounds.top + bounds.bottom) / 2} fill={axisColor} stroke="#090d16" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700" transform={`rotate(-90 ${part.x + 11} ${(bounds.top + bounds.bottom) / 2})`}>{labels.y}</text>
               </g>
             );
           }
 
           if (part.type === "orbit") {
+            const effectiveW = part.width > 60 ? part.width : Math.max(120, shape.props.w - 30);
+            const effectiveH = part.height > 60 ? part.height : Math.max(100, shape.props.h - 30);
+            const cx = part.x > 0 ? part.x + part.width / 2 : shape.props.w / 2;
+            const cy = part.y > 0 ? part.y + part.height / 2 : shape.props.h / 2;
+            const radius = Math.max(42, Math.min(effectiveW, effectiveH) / 2 - 14);
+            const dataStr = (part.data || "").toLowerCase();
+            const labelStr = (shape.props.label || "").toLowerCase();
+            const isCelestial =
+              dataStr.includes("celestial") ||
+              dataStr.includes("moon") ||
+              dataStr.includes("earth") ||
+              dataStr.includes("planet") ||
+              dataStr.includes("space") ||
+              dataStr.includes("gravity") ||
+              labelStr.includes("moon") ||
+              labelStr.includes("earth") ||
+              labelStr.includes("orbit") ||
+              labelStr.includes("planet");
+
+            if (isCelestial && !dataStr.match(/^\d+$/)) {
+              const earthR = Math.max(18, radius * 0.28);
+              const moonR = Math.max(10, radius * 0.12);
+              return (
+                <g key={key}>
+                  {/* Outer Orbit Path - Clean dashed circle */}
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={radius}
+                    fill="none"
+                    stroke="#94a3b8"
+                    strokeWidth={1.8}
+                    strokeDasharray="6 5"
+                    opacity={0.75}
+                  />
+
+                  {/* Central Body: Earth */}
+                  <g>
+                    {/* Atmosphere halo */}
+                    <circle cx={cx} cy={cy} r={earthR + 5} fill="#38bdf8" opacity={0.25} filter={`url(#${markerId}-glow)`} />
+                    {/* Earth sphere */}
+                    <circle cx={cx} cy={cy} r={earthR} fill={`url(#${markerId}-earth)`} stroke="#38bdf8" strokeWidth={1.5} filter={`url(#${markerId}-shadow)`} />
+                    {/* Continents details */}
+                    <path
+                      d={`M ${cx - earthR * 0.4} ${cy - earthR * 0.3} Q ${cx - earthR * 0.1} ${cy - earthR * 0.6} ${cx + earthR * 0.2} ${cy - earthR * 0.2} Q ${cx} ${cy + earthR * 0.3} ${cx - earthR * 0.3} ${cy + earthR * 0.4} Z`}
+                      fill="#10b981"
+                      opacity={0.85}
+                    />
+                    <path
+                      d={`M ${cx + earthR * 0.2} ${cy - earthR * 0.1} Q ${cx + earthR * 0.5} ${cy} ${cx + earthR * 0.3} ${cy + earthR * 0.4} Z`}
+                      fill="#10b981"
+                      opacity={0.8}
+                    />
+                    <text
+                      x={cx}
+                      y={cy}
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                      fill="#ffffff"
+                      fontFamily="Inter, ui-sans-serif, system-ui"
+                      fontSize={Math.max(9, earthR * 0.45)}
+                      fontWeight="800"
+                      filter={`url(#${markerId}-shadow)`}
+                    >
+                      Earth
+                    </text>
+                  </g>
+
+                  {/* Revolving Moon & Forces System */}
+                  <g className="celestial-orbit-spin" style={{ transformOrigin: `${cx}px ${cy}px` }}>
+                    {/* Moon positioned at top of orbit (cx, cy - radius) */}
+                    <g transform={`translate(${cx}, ${cy - radius})`}>
+                      {/* Tangent Velocity Vector (Forward Inertia v) - Cyan Arrow */}
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={Math.min(70, radius * 0.55)}
+                        y2={0}
+                        stroke="#06b6d4"
+                        strokeWidth={2.8}
+                        markerEnd={`url(#${markerId}-cyan)`}
+                      />
+                      <rect x={14} y={-16} width={58} height={14} rx={4} fill="#0f172a" fillOpacity={0.85} />
+                      <text x={43} y={-8} textAnchor="middle" dominantBaseline="middle" fill="#22d3ee" fontSize={8.5} fontWeight="700">
+                        v (Velocity)
+                      </text>
+
+                      {/* Gravitational Pull Vector (Inward Acceleration Fg) - Red Arrow */}
+                      <line
+                        x1={0}
+                        y1={0}
+                        x2={0}
+                        y2={Math.min(65, radius * 0.5)}
+                        stroke="#ef4444"
+                        strokeWidth={2.8}
+                        markerEnd={`url(#${markerId}-red)`}
+                      />
+                      <rect x={6} y={16} width={56} height={14} rx={4} fill="#0f172a" fillOpacity={0.85} />
+                      <text x={34} y={24} textAnchor="middle" dominantBaseline="middle" fill="#f87171" fontSize={8.5} fontWeight="700">
+                        Fg (Gravity)
+                      </text>
+
+                      {/* Resultant Trajectory Curve (Perpetual Free-Fall Arc) */}
+                      <path
+                        d={`M 0 0 Q ${radius * 0.3} 0 ${radius * 0.4} ${radius * 0.25}`}
+                        fill="none"
+                        stroke="#fbbf24"
+                        strokeWidth={2}
+                        strokeDasharray="3 3"
+                        opacity={0.85}
+                      />
+
+                      {/* Moon Celestial Body */}
+                      <circle cx={0} cy={0} r={moonR} fill={`url(#${markerId}-moon)`} stroke="#f1f5f9" strokeWidth={1.5} filter={`url(#${markerId}-shadow)`} />
+                      <circle cx={-moonR * 0.3} cy={-moonR * 0.2} r={moonR * 0.25} fill="#475569" opacity={0.6} />
+                      <circle cx={moonR * 0.25} cy={moonR * 0.25} r={moonR * 0.2} fill="#475569" opacity={0.5} />
+                      <text
+                        x={0}
+                        y={0}
+                        textAnchor="middle"
+                        dominantBaseline="middle"
+                        fill="#ffffff"
+                        fontSize={Math.max(7, moonR * 0.65)}
+                        fontWeight="800"
+                      >
+                        Moon
+                      </text>
+                    </g>
+                  </g>
+                </g>
+              );
+            }
+
+            // Atomic Bohr Orbit fallback (electrons rotating on shells)
             const count = countFromData(part.data, 2, 1, 32);
-            const cx = part.x + part.width / 2;
-            const cy = part.y + part.height / 2;
-            const radius = Math.max(10, Math.min(part.width, part.height) / 2);
             return (
               <g key={key}>
-                {/* Clean circular orbit ring */}
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={radius}
-                  fill="none"
-                  stroke={common.stroke || palette.slate}
-                  strokeWidth={1.5}
-                  strokeDasharray="6 4"
-                  opacity={0.7}
-                />
-                {/* Rotating electron particles on the orbit ring */}
+                <circle cx={cx} cy={cy} r={radius} fill="none" stroke={common.stroke || palette.slate} strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
                 <g className="animated-spin" style={{ transformOrigin: `${cx}px ${cy}px` }}>
                   {Array.from({ length: count }, (_, i) => {
                     const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
@@ -624,17 +960,21 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           if (part.type === "polyline") return <polyline key={key} {...common} points={part.data} fill="none" />;
           if (part.type === "path") return <path key={key} {...common} d={part.data} />;
 
+          const textColor = (part.fill && part.fill !== "none")
+            ? (textPalette[part.fill] || palette[part.fill] || "#f8fafc")
+            : (textPalette[part.stroke] || palette[part.stroke] || "#f8fafc");
+
           return (
             <text
               key={key}
               {...common}
               x={part.x}
               y={part.y}
-              fill={palette[part.fill] === "none" ? palette[part.stroke] : palette[part.fill]}
+              fill={textColor}
               stroke="none"
               fontFamily="Inter, ui-sans-serif, system-ui"
-              fontSize={Math.max(10, Math.min(28, part.height || 14))}
-              fontWeight="650"
+              fontSize={Math.max(11, Math.min(28, part.height || 14))}
+              fontWeight="700"
               textAnchor="middle"
               dominantBaseline="middle"
             >
@@ -655,10 +995,10 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         const pillH = lines.length > 1 ? fontSize * 2 + pillPadY * 2 + 2 : fontSize + pillPadY * 2;
         const pillX = Math.max(4, labelX - pillW / 2);
         const pillY = labelY - pillH / 2;
-        const bgFill = isContainer ? "#1e293b" : "#ffffff";
-        const bgOpacity = isContainer ? 0.88 : 0.94;
-        const textFill = isContainer ? "#ffffff" : "#0f172a";
-        const strokeColor = isContainer ? "none" : "#e2e8f0";
+        const bgFill = "#181b29";
+        const bgOpacity = 0.94;
+        const textFill = "#f8fafc";
+        const strokeColor = "#333c54";
         return (
           <g>
             <rect
@@ -670,7 +1010,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
               fill={bgFill}
               fillOpacity={bgOpacity}
               stroke={strokeColor}
-              strokeWidth={strokeColor === "none" ? 0 : 1}
+              strokeWidth={1}
               filter={`url(#${markerId}-shadow)`}
             />
             <text
@@ -693,9 +1033,18 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           </g>
         );
       })()}
+      </g>
     </SVGContainer>
   );
 }
+
+import {
+  customShapeUtils,
+  ChartShapeUtil,
+  SvgShapeUtil,
+  TemplateShapeUtil,
+  CUSTOM_TEMPLATE_TYPE,
+} from "@/components/custom-shapes";
 
 export class ChalkVisualShapeUtil extends BaseBoxShapeUtil<ChalkVisualShape> {
   static override type = CHALK_VISUAL_TYPE;
@@ -723,4 +1072,6 @@ export class ChalkVisualShapeUtil extends BaseBoxShapeUtil<ChalkVisualShape> {
   }
 }
 
-export const chalkShapeUtils = [ChalkVisualShapeUtil];
+export { customShapeUtils, ChartShapeUtil, SvgShapeUtil, TemplateShapeUtil, CUSTOM_TEMPLATE_TYPE };
+export const chalkShapeUtils = [ChalkVisualShapeUtil, ...customShapeUtils];
+

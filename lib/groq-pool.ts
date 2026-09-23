@@ -1,4 +1,4 @@
-import { resolveProviderCredentials, type ProviderGroqKey } from "@/lib/provider-credentials";
+import { resolveProviderCredentials, type ProviderGroqKey } from "./provider-credentials";
 
 const GROQ_BASE_URL = "https://api.groq.com/openai/v1";
 
