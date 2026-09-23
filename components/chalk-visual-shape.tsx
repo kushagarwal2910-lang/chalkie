@@ -109,7 +109,7 @@ function parseClusterData(data: string, fallbackTotal = 12) {
   return { protons: Math.min(16, protons), neutrons: Math.min(16, neutrons) };
 }
 
-function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean) {
+function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean, uid: string) {
   if (hasAxes) return null;
   // If the object already has its own vector illustration parts, DO NOT draw a card box around it
   // unless it is explicitly an environment, container, or background layer!
@@ -118,77 +118,124 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
   }
 
   if (role === "container") {
+    // Production-grade frosted-glass container with subtle gradient border
     return (
       <g>
+        <defs>
+          <linearGradient id={`${uid}-container-bg`} x1="0%" y1="0%" x2="0%" y2="100%">
+            <stop offset="0%" stopColor="#f8fafc" stopOpacity={0.95} />
+            <stop offset="100%" stopColor="#f1f5f9" stopOpacity={0.88} />
+          </linearGradient>
+          <linearGradient id={`${uid}-container-border`} x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#94a3b8" />
+            <stop offset="50%" stopColor="#cbd5e1" />
+            <stop offset="100%" stopColor="#94a3b8" />
+          </linearGradient>
+        </defs>
+        {/* Outer soft shadow layer */}
         <rect
-          x={2}
-          y={2}
-          width={Math.max(0, w - 4)}
-          height={Math.max(0, h - 4)}
-          rx={14}
-          fill="#f8fafc"
-          fillOpacity={0.85}
-          stroke="#475569"
-          strokeWidth={2.5}
-          strokeDasharray="6 3"
+          x={4}
+          y={5}
+          width={Math.max(0, w - 8)}
+          height={Math.max(0, h - 8)}
+          rx={16}
+          fill="#0f172a"
+          fillOpacity={0.06}
         />
-        {/* Subtle technical corner accents */}
-        <path d={`M 14 2 L 2 2 L 2 14`} fill="none" stroke="#2563eb" strokeWidth={3} />
-        <path d={`M ${w - 14} 2 L ${w - 2} 2 L ${w - 2} 14`} fill="none" stroke="#2563eb" strokeWidth={3} />
-        <path d={`M 2 ${h - 14} L 2 ${h - 2} L 14 ${h - 2}`} fill="none" stroke="#2563eb" strokeWidth={3} />
-        <path d={`M ${w - 14} ${h - 2} L ${w - 2} ${h - 2} L ${w - 2} ${h - 14}`} fill="none" stroke="#2563eb" strokeWidth={3} />
+        {/* Main container card */}
+        <rect
+          x={3}
+          y={3}
+          width={Math.max(0, w - 6)}
+          height={Math.max(0, h - 6)}
+          rx={16}
+          fill={`url(#${uid}-container-bg)`}
+          stroke={`url(#${uid}-container-border)`}
+          strokeWidth={1.5}
+        />
+        {/* Subtle inner highlight line at top */}
+        <rect
+          x={8}
+          y={4}
+          width={Math.max(0, w - 16)}
+          height={1}
+          rx={0.5}
+          fill="#ffffff"
+          fillOpacity={0.7}
+        />
       </g>
     );
   }
 
   if (role === "environment") {
+    // Clean, soft environment backdrop
     return (
-      <rect
-        x={2}
-        y={2}
-        width={Math.max(0, w - 4)}
-        height={Math.max(0, h - 4)}
-        rx={16}
-        fill="#f1f5f9"
-        fillOpacity={0.65}
-        stroke="#94a3b8"
-        strokeWidth={2}
-        strokeDasharray="8 5"
-      />
+      <g>
+        <rect
+          x={4}
+          y={5}
+          width={Math.max(0, w - 8)}
+          height={Math.max(0, h - 8)}
+          rx={20}
+          fill="#0f172a"
+          fillOpacity={0.04}
+        />
+        <rect
+          x={3}
+          y={3}
+          width={Math.max(0, w - 6)}
+          height={Math.max(0, h - 6)}
+          rx={20}
+          fill="#f1f5f9"
+          fillOpacity={0.72}
+          stroke="#cbd5e1"
+          strokeWidth={1.2}
+        />
+      </g>
     );
   }
 
   if (role === "layer" || role === "field") {
+    // Subtle translucent layer zone
     return (
+      <rect
+        x={3}
+        y={3}
+        width={Math.max(0, w - 6)}
+        height={Math.max(0, h - 6)}
+        rx={12}
+        fill="#f8fafc"
+        fillOpacity={0.55}
+        stroke="#e2e8f0"
+        strokeWidth={1}
+      />
+    );
+  }
+
+  // Fallback: clean card with subtle shadow (no dashed lines)
+  return (
+    <g>
+      <rect
+        x={4}
+        y={5}
+        width={Math.max(0, w - 8)}
+        height={Math.max(0, h - 8)}
+        rx={12}
+        fill="#0f172a"
+        fillOpacity={0.07}
+      />
       <rect
         x={2}
         y={2}
         width={Math.max(0, w - 4)}
         height={Math.max(0, h - 4)}
-        rx={10}
-        fill="#f8fafc"
-        fillOpacity={0.5}
-        stroke="#cbd5e1"
+        rx={12}
+        fill="#ffffff"
+        fillOpacity={0.95}
+        stroke="#e2e8f0"
         strokeWidth={1.5}
-        strokeDasharray="5 3"
       />
-    );
-  }
-
-  // Only reached if hasParts is false (fallback placeholder)
-  return (
-    <rect
-      x={2}
-      y={2}
-      width={Math.max(0, w - 4)}
-      height={Math.max(0, h - 4)}
-      rx={10}
-      fill="#ffffff"
-      fillOpacity={0.92}
-      stroke="#64748b"
-      strokeWidth={2}
-      strokeLinejoin="round"
-    />
+    </g>
   );
 }
 
@@ -272,7 +319,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         `}</style>
       </defs>
 
-      {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0)}
+      {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid)}
 
       <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`}>
         {parts.map((part, index) => {
@@ -597,41 +644,55 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         })}
       </g>
 
-      {/* Technical Callout Badge for Object Label */}
-      {shape.props.labelPlacement !== "none" && shape.props.label && (
-        <g>
-          {/* Subtle translucent pill backing so label is always crisp and readable */}
-          <rect
-            x={Math.max(4, labelX - (shape.props.label.length * 4.2 + 14))}
-            y={labelY - 11}
-            width={Math.min(shape.props.w - 8, shape.props.label.length * 8.4 + 28)}
-            height={22}
-            rx={11}
-            fill="#ffffff"
-            fillOpacity={0.92}
-            stroke="#e2e8f0"
-            strokeWidth={1}
-            filter={`url(#${markerId}-shadow)`}
-          />
-          <text
-            x={labelX}
-            y={labelY}
-            textAnchor="middle"
-            dominantBaseline="middle"
-            fill="#0f172a"
-            fontFamily="Inter, ui-sans-serif, system-ui"
-            fontSize="12"
-            fontWeight="700"
-            letterSpacing="-0.01em"
-          >
-            {lines.map((line, index) => (
-              <tspan key={line} x={labelX} dy={index === 0 ? (lines.length > 1 ? -5 : 0) : 13}>
-                {line}
-              </tspan>
-            ))}
-          </text>
-        </g>
-      )}
+      {/* Production-Grade Label Badge */}
+      {shape.props.labelPlacement !== "none" && shape.props.label && (() => {
+        const isContainer = ["container", "environment", "layer", "field"].includes(shape.props.role);
+        const fontSize = isContainer ? 13 : 11;
+        const charWidth = fontSize * 0.58;
+        const pillPadX = 14;
+        const pillPadY = 5;
+        const pillW = Math.min(shape.props.w - 8, shape.props.label.length * charWidth + pillPadX * 2);
+        const pillH = lines.length > 1 ? fontSize * 2 + pillPadY * 2 + 2 : fontSize + pillPadY * 2;
+        const pillX = Math.max(4, labelX - pillW / 2);
+        const pillY = labelY - pillH / 2;
+        const bgFill = isContainer ? "#1e293b" : "#ffffff";
+        const bgOpacity = isContainer ? 0.88 : 0.94;
+        const textFill = isContainer ? "#ffffff" : "#0f172a";
+        const strokeColor = isContainer ? "none" : "#e2e8f0";
+        return (
+          <g>
+            <rect
+              x={pillX}
+              y={pillY}
+              width={pillW}
+              height={pillH}
+              rx={pillH / 2}
+              fill={bgFill}
+              fillOpacity={bgOpacity}
+              stroke={strokeColor}
+              strokeWidth={strokeColor === "none" ? 0 : 1}
+              filter={`url(#${markerId}-shadow)`}
+            />
+            <text
+              x={labelX}
+              y={labelY}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fill={textFill}
+              fontFamily="Inter, ui-sans-serif, system-ui"
+              fontSize={fontSize}
+              fontWeight="700"
+              letterSpacing="-0.01em"
+            >
+              {lines.map((line, index) => (
+                <tspan key={line} x={labelX} dy={index === 0 ? (lines.length > 1 ? -(fontSize * 0.45) : 0) : fontSize + 2}>
+                  {line}
+                </tspan>
+              ))}
+            </text>
+          </g>
+        );
+      })()}
     </SVGContainer>
   );
 }
