@@ -14,6 +14,7 @@ import type { LessonPlan, LessonSegment, VisualConnection, VisualObject } from "
 import { CHALK_VISUAL_TYPE, chalkShapeUtils } from "@/components/chalk-visual-shape";
 import { CUSTOM_CHART_TYPE, CUSTOM_SVG_TYPE, CUSTOM_TEMPLATE_TYPE } from "@/components/custom-shapes";
 import { applyElkLayout } from "@/lib/elk-spatial-layout";
+import { formatMathFormula } from "@/lib/math-formatter";
 
 const tldrawColor: Record<string, "black" | "grey" | "blue" | "light-blue" | "violet" | "orange" | "green" | "red" | "yellow"> = {
   ink: "light-blue", slate: "grey", blue: "blue", cyan: "light-blue", violet: "violet", orange: "orange", green: "green", red: "red", yellow: "yellow", white: "light-blue", none: "light-blue",
@@ -173,7 +174,7 @@ function objectShape(object: VisualObject): TLShapePartial {
       props: {
         w: Math.max(120, object.width),
         h: Math.max(80, object.height),
-        label: object.label || "",
+        label: formatMathFormula(object.label || ""),
         labelPlacement: object.labelPlacement || "below",
         role: object.role,
         partsJson: JSON.stringify(object.parts || []),
@@ -197,7 +198,7 @@ function objectShape(object: VisualObject): TLShapePartial {
           font: "draw",
           align: "middle",
           verticalAlign: "middle",
-          richText: toRichText(object.label || ""),
+          richText: toRichText(formatMathFormula(object.label || "")),
         },
         meta: { chalkieId: object.id, role: object.role },
       } as TLShapePartial;
@@ -212,7 +213,7 @@ function objectShape(object: VisualObject): TLShapePartial {
       props: {
         w: Math.max(150, object.width),
         h: Math.max(80, object.height),
-        label: object.label || "",
+        label: formatMathFormula(object.label || ""),
         labelPlacement: object.labelPlacement || "inside",
         role: object.role,
         partsJson: JSON.stringify(object.parts || []),

@@ -1,4 +1,5 @@
 import type { LessonPlan, VisualObject, VisualPart } from "./lesson-schema";
+import { formatMathFormula } from "./math-formatter";
 
 const CANVAS_WIDTH = 1280;
 const CANVAS_HEIGHT = 720;
@@ -85,7 +86,9 @@ function normalizePartCoordinates(part: VisualPart, objX: number, objY: number, 
 
 function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
   const pathData = /^[MmLlHhVvCcSsQqTtAaZz0-9.,\s-]*$/;
-  const text = (part.text || "").replace(/[<>]/g, "").replace(/\s+/g, " ").trim().slice(0, 42);
+  const rawText = part.text || "";
+  const formattedText = formatMathFormula(rawText).replace(/[<>]/g, "").replace(/\s+/g, " ").trim();
+  const text = formattedText.slice(0, 180);
   const strokeWidth = part.stroke === "none" ? 0 : clamp(part.strokeWidth || 2, 1.5, 8);
   const opacity = clamp(part.opacity || 1, 0.3, 1);
 
@@ -144,8 +147,14 @@ function sanitizeTextPart(part: VisualPart, bounds: Bounds, occupied: TextBox[])
   return chosen;
 }
 
-function sanitizeParts(parts: VisualPart[], objectWidth: number, objectHeight: number, objectX = 0, objectY = 0) {
-  const objectBounds = { minX: 2, minY: 2, maxX: Math.max(2, objectWidth - 2), maxY: Math.max(2, objectHeight - 2) };
+function sanitizeParts(parts: VisualPart[], objectWidth: number, objectHeight: number, objectX = 0, objectY = 0, role = "") {
+  const isFormula = role === "formula";
+  const objectBounds = {
+    minX: isFormula ? 16 : 2,
+    minY: isFormula ? 36 : 2,
+    maxX: Math.max(2, objectWidth - (isFormula ? 16 : 2)),
+    maxY: Math.max(2, objectHeight - (isFormula ? 10 : 2)),
+  };
   const isAbsolute = arePartsInAbsoluteCoords(parts, objectX, objectY, objectWidth, objectHeight);
   const rawAxes = parts.find((part) => part.type === "axes");
   const axes = rawAxes ? sanitizePart(normalizePartCoordinates(rawAxes, objectX, objectY, objectWidth, objectHeight, isAbsolute), objectBounds) : null;
@@ -553,13 +562,14 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     const hasAxes = object.parts.some((part) => part.type === "axes");
     const isBackdrop = BACKDROP_ROLES.has(object.role) || object.shapeType === "frame";
     const isFormulaNote = object.shapeType === "note" && object.role === "annotation" && /[=+Δ\\/*^]/.test(object.label);
+    const isFormula = object.role === "formula" || isFormulaNote || /^(formula|equation|governing equation|learning equation|loss equation)/i.test(object.label.trim());
 
     const isCustomSemantic = object.shapeType === "custom-template" || object.shapeType === "custom-chart" || object.shapeType === "custom-svg";
 
-    // Ensure legible dimensions so labels never awkwardly break across lines (e.g. Moo n, grav ity)
-    const minW = isCustomSemantic ? 320 : hasAxes ? 360 : isBackdrop ? 440 : 150;
+    // Ensure legible dimensions so formulas and labels have ample breathing room
+    const minW = isCustomSemantic ? 320 : hasAxes ? 360 : isBackdrop ? 440 : isFormula ? 260 : 150;
     const maxW = isCustomSemantic ? 880 : isBackdrop ? 1080 : hasAxes ? 820 : 580;
-    const minH = isCustomSemantic ? 220 : hasAxes ? 240 : isBackdrop ? 260 : 80;
+    const minH = isCustomSemantic ? 220 : hasAxes ? 240 : isBackdrop ? 260 : isFormula ? 88 : 80;
     const maxH = isCustomSemantic ? 580 : isBackdrop ? 660 : hasAxes ? 520 : 480;
 
     const width = clamp(object.width, minW, maxW);
@@ -568,13 +578,13 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     return {
       ...object,
       id: objectId,
-      label: object.label.replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim().slice(0, 48),
+      label: formatMathFormula(object.label).replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim().slice(0, 80),
       labelPlacement: hasAxes ? "none" as const : object.labelPlacement,
       width,
       height,
       x: clamp(object.x, EDGE, CANVAS_WIDTH - width - EDGE),
       y: clamp(object.y, EDGE, CANVAS_HEIGHT - height - EDGE),
-      parts: isCustomSemantic ? object.parts : sanitizeParts(object.parts, width, height, object.x, object.y),
+      parts: isCustomSemantic ? object.parts : sanitizeParts(object.parts, width, height, object.x, object.y, object.role),
     };
   });
 

@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
+@import url("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css");
 
 :root {
   --background: #090a0f;

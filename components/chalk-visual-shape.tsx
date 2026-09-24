@@ -8,6 +8,7 @@ import {
   type TLShape,
 } from "tldraw";
 import type { VisualPart } from "@/lib/lesson-schema";
+import { formatMathFormula, isMathematicalFormula } from "@/lib/math-formatter";
 
 export const CHALK_VISUAL_TYPE = "chalk-visual" as const;
 
@@ -123,9 +124,12 @@ function oscillatingPath(x: number, y: number, width: number, height: number, cy
 
 function axisLabels(data: string) {
   const pieces = data.split("|");
-  const x = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "").trim() || "Horizontal value";
-  const y = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "").trim() || "Vertical value";
-  return { x, y };
+  const rawX = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "").trim() || "Horizontal value";
+  const rawY = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "").trim() || "Vertical value";
+  return {
+    x: formatMathFormula(rawX),
+    y: formatMathFormula(rawY),
+  };
 }
 
 function axisPlot(part: VisualPart) {
@@ -156,7 +160,7 @@ function parseClusterData(data: string, fallbackTotal = 12) {
   return { protons: Math.min(16, protons), neutrons: Math.min(16, neutrons) };
 }
 
-function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean, uid: string) {
+function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolean, hasParts: boolean, uid: string, label = "") {
   if (hasAxes) return null;
   // If the object already has its own vector illustration parts, DO NOT draw a card box around it
   // unless it is explicitly an environment, container, background layer, or formula plaque!
@@ -165,18 +169,22 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
   }
 
   if (role === "formula") {
-    // Dedicated chalkboard mathematical plaque
+    // Dedicated chalkboard mathematical plaque with clean header and spacious equation arena
+    const rawLabel = label ? label.replace(/^[:\s\-—]+/, "").trim() : "";
+    const isMath = isMathematicalFormula(rawLabel);
+    const displayTitle = isMath ? "GOVERNING EQUATION" : (rawLabel ? rawLabel.toUpperCase() : "FORMULA");
+
     return (
       <g>
         <defs>
           <linearGradient id={`${uid}-formula-bg`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#141a2e" stopOpacity={0.95} />
-            <stop offset="100%" stopColor="#0c101c" stopOpacity={0.92} />
+            <stop offset="0%" stopColor="#141a2e" stopOpacity={0.96} />
+            <stop offset="100%" stopColor="#0a0d18" stopOpacity={0.94} />
           </linearGradient>
           <linearGradient id={`${uid}-formula-border`} x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.7} />
-            <stop offset="50%" stopColor="#818cf8" stopOpacity={0.5} />
-            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.7} />
+            <stop offset="0%" stopColor="#38bdf8" stopOpacity={0.8} />
+            <stop offset="50%" stopColor="#818cf8" stopOpacity={0.6} />
+            <stop offset="100%" stopColor="#38bdf8" stopOpacity={0.8} />
           </linearGradient>
         </defs>
         <rect
@@ -186,7 +194,7 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           height={Math.max(0, h - 8)}
           rx={14}
           fill="#000000"
-          fillOpacity={0.35}
+          fillOpacity={0.4}
         />
         <rect
           x={3}
@@ -198,29 +206,57 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
           stroke={`url(#${uid}-formula-border)`}
           strokeWidth={1.5}
         />
-        {/* Math "f(x)" badge indicator */}
-        <rect
-          x={12}
-          y={10}
-          width={28}
-          height={18}
-          rx={4}
-          fill="#38bdf8"
-          fillOpacity={0.15}
-          stroke="#38bdf8"
-          strokeWidth={1}
-        />
-        <text
-          x={26}
-          y={23}
-          textAnchor="middle"
-          fontSize="11"
-          fontWeight="bold"
-          fill="#38bdf8"
-          fontFamily="monospace, serif"
-        >
-          f(x)
-        </text>
+        {/* Header Bar */}
+        <g>
+          {/* Math "f(x)" badge indicator */}
+          <rect
+            x={12}
+            y={10}
+            width={28}
+            height={18}
+            rx={4}
+            fill="#38bdf8"
+            fillOpacity={0.18}
+            stroke="#38bdf8"
+            strokeWidth={1}
+          />
+          <text
+            x={26}
+            y={22.5}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fontSize="10"
+            fontWeight="bold"
+            fill="#38bdf8"
+            fontFamily="'KaTeX_Main', 'Cambria Math', serif, monospace"
+          >
+            f(x)
+          </text>
+          {displayTitle && (
+            <text
+              x={48}
+              y={22.5}
+              dominantBaseline="middle"
+              fill="#94a3b8"
+              fontSize="11"
+              fontWeight="700"
+              letterSpacing="0.04em"
+              fontFamily="Inter, ui-sans-serif, system-ui"
+            >
+              {displayTitle}
+            </text>
+          )}
+          <line
+            x1={12}
+            y1={32}
+            x2={Math.max(12, w - 12)}
+            y2={32}
+            stroke="#334155"
+            strokeWidth={1}
+            strokeOpacity={0.6}
+            strokeDasharray="4 3"
+          />
+        </g>
       </g>
     );
   }
@@ -476,7 +512,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
       </defs>
 
       <g className="chalk-shape-container">
-        {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid)}
+        {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid, shape.props.label)}
 
         <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`}>
         {parts.map((part, index) => {
@@ -567,11 +603,11 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
                     textAnchor="middle"
                     dominantBaseline="middle"
                     fill={getContrastingTextColor(rawFill !== "none" ? rawFill : part.fill)}
-                    fontFamily="Inter, ui-sans-serif, system-ui"
+                    fontFamily={isMathematicalFormula(part.text) ? "'KaTeX_Main', 'Cambria Math', serif" : "Inter, ui-sans-serif, system-ui"}
                     fontSize={Math.max(14, Math.min(22, finalRx * 0.65))}
                     fontWeight="900"
                   >
-                    {part.text}
+                    {formatMathFormula(part.text)}
                   </text>
                 )}
               </g>
@@ -622,12 +658,13 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
                     x={part.x + part.width / 2}
                     y={part.y + part.height / 2 - 8}
                     fill={textPalette[part.stroke] || "#f8fafc"}
+                    fontFamily={isMathematicalFormula(part.text) ? "'KaTeX_Main', 'Cambria Math', serif" : "Inter, ui-sans-serif, system-ui"}
                     fontSize={12}
                     fontWeight="700"
                     textAnchor="middle"
                     dominantBaseline="middle"
                   >
-                    {part.text}
+                    {formatMathFormula(part.text)}
                   </text>
                 )}
               </g>
@@ -962,7 +999,41 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           if (part.type === "polyline") return <polyline key={key} {...common} points={part.data} fill="none" />;
           if (part.type === "path") return <path key={key} {...common} d={part.data} />;
 
-          const textColor = (part.fill && part.fill !== "none")
+          const isFormulaCard = shape.props.role === "formula";
+          const rawText = part.text || "";
+          const cleanText = formatMathFormula(rawText);
+          const isMath = isMathematicalFormula(rawText) || isFormulaCard;
+          const mathFont = "'KaTeX_Main', 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', 'Times New Roman', serif";
+          const normalFont = "Inter, ui-sans-serif, system-ui";
+
+          let posX = part.x;
+          let posY = part.y;
+          let textFontSize = Math.max(11, Math.min(28, part.height || 14));
+          let textAnchor: "middle" | "start" | "end" = "middle";
+
+          if (isFormulaCard) {
+            const textParts = parts.filter((p) => p.type === "text" || Boolean(p.text));
+            const textIdx = textParts.findIndex((p) => p === part);
+            posX = shape.props.w / 2;
+            textAnchor = "middle";
+
+            if (textParts.length <= 1) {
+              posY = 33 + (shape.props.h - 33) / 2;
+              const availableW = shape.props.w - 32;
+              textFontSize = Math.max(15, Math.min(24, Math.floor(availableW / Math.max(1, cleanText.length * 0.52))));
+            } else {
+              const availableH = shape.props.h - 38;
+              const lineGap = availableH / (textParts.length + 1);
+              posY = 34 + lineGap * (textIdx + 1);
+              textFontSize = textIdx === 0
+                ? Math.max(14, Math.min(20, Math.floor((shape.props.w - 32) / Math.max(1, cleanText.length * 0.52))))
+                : 12;
+            }
+          }
+
+          const textColor = isFormulaCard
+            ? "#38bdf8"
+            : (part.fill && part.fill !== "none")
             ? (textPalette[part.fill] || palette[part.fill] || "#f8fafc")
             : (textPalette[part.stroke] || palette[part.stroke] || "#f8fafc");
 
@@ -970,24 +1041,45 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             <text
               key={key}
               {...common}
-              x={part.x}
-              y={part.y}
+              x={posX}
+              y={posY}
               fill={textColor}
               stroke="none"
-              fontFamily="Inter, ui-sans-serif, system-ui"
-              fontSize={Math.max(11, Math.min(28, part.height || 14))}
-              fontWeight="700"
-              textAnchor="middle"
+              fontFamily={isMath ? mathFont : normalFont}
+              fontSize={textFontSize}
+              fontWeight={isMath ? "600" : "700"}
+              textAnchor={textAnchor}
               dominantBaseline="middle"
+              filter={isFormulaCard ? `url(#${markerId}-glow)` : undefined}
             >
-              {part.text}
+              {cleanText}
             </text>
           );
         })}
+
+        {/* If formula card has no text parts, render the formula directly from label */}
+        {shape.props.role === "formula" && parts.filter((p) => p.type === "text" || Boolean(p.text)).length === 0 && shape.props.label && (
+          <text
+            x={shape.props.w / 2}
+            y={33 + (shape.props.h - 33) / 2}
+            textAnchor="middle"
+            dominantBaseline="middle"
+            fill="#38bdf8"
+            fontFamily="'KaTeX_Main', 'Cambria Math', 'STIX Two Math', 'Latin Modern Math', 'Times New Roman', serif"
+            fontSize={Math.max(15, Math.min(24, Math.floor((shape.props.w - 32) / Math.max(1, formatMathFormula(shape.props.label).length * 0.52))))}
+            fontWeight="600"
+            filter={`url(#${markerId}-glow)`}
+          >
+            {formatMathFormula(shape.props.label)}
+          </text>
+        )}
       </g>
 
       {/* Production-Grade Label Badge */}
       {shape.props.labelPlacement !== "none" && shape.props.label && (() => {
+        // Dedicated formula cards already feature their title in the top header beside f(x)
+        if (shape.props.role === "formula") return null;
+
         const cleanBase = (str: string) => str.trim().toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
         const targetClean = cleanBase(shape.props.label);
         // If an inner visual part already displays this label, suppress the redundant pill badge!
@@ -1001,7 +1093,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         const isContainer = ["container", "environment", "layer", "field"].includes(shape.props.role);
         const fontSize = isContainer ? 12 : 11;
         // Clean display label: remove leading colons, hyphens, or punctuation artifacts
-        const displayLabel = shape.props.label.replace(/^[:\s\-—]+/, "").trim();
+        const displayLabel = formatMathFormula(shape.props.label).replace(/^[:\s\-—]+/, "").trim();
         if (!displayLabel) return null;
 
         const charWidth = fontSize * 0.58;
