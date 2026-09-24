@@ -1,9 +1,11 @@
 import type { LessonPlan, VisualObject, VisualPart } from "./lesson-schema";
 
-const CANVAS_WIDTH = 1160;
-const CANVAS_HEIGHT = 700;
+const CANVAS_WIDTH = 1280;
+const CANVAS_HEIGHT = 720;
 const GAP = 36;
-const EDGE = 24;
+const EDGE = 48;
+const USABLE_W = CANVAS_WIDTH - 2 * EDGE;
+const USABLE_H = CANVAS_HEIGHT - 2 * EDGE;
 export const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -264,457 +266,14 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
     obj.height = Math.max(minH, obj.height || 100);
   }
 
-  // 1b. Neural Networks & Perceptrons: Clean canonical demo objects or consolidate broken empty payloads
-  const isCanonicalDemoNN = plan.objects.some((o) => o.id === "nn-input-layer");
-  const isExplicitEmptyNNQuestion =
-    /\b(how (do|does) (a )?neural networks? learn|perceptron architecture|basic neural network)\b/i.test(qLower) &&
-    plan.objects.length >= 2 &&
-    plan.objects.every((o) => !o.parts || o.parts.length === 0);
-
-  if (isCanonicalDemoNN) {
-    const canonicalIds = new Set(["nn-input-layer", "nn-hidden-layer", "nn-output-layer", "nn-formula-loss"]);
-    // Ensure only the clean canonical objects remain (remove any stray boxes or fragments)
-    plan.objects = plan.objects.filter((o) => canonicalIds.has(o.id));
-  } else if (isExplicitEmptyNNQuestion) {
-      const inputLayerObj: VisualObject = {
-        id: "nn-input-layer",
-        role: "input",
-        shapeType: "custom",
-        label: "Input Layer (X)",
-        labelPlacement: "above",
-        x: 80,
-        y: 80,
-        width: 180,
-        height: 360,
-        parts: [
-          { type: "ellipse", x: 45, y: 70, width: 60, height: 60, fill: "blue", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "x₁", data: "circle" },
-          { type: "ellipse", x: 45, y: 160, width: 60, height: 60, fill: "blue", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "x₂", data: "circle" },
-          { type: "ellipse", x: 45, y: 250, width: 60, height: 60, fill: "blue", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "x₃", data: "circle" },
-        ],
-      };
-
-      const hiddenLayerObj: VisualObject = {
-        id: "nn-hidden-layer",
-        role: "component",
-        shapeType: "custom",
-        label: "Hidden Layer (H)",
-        labelPlacement: "above",
-        x: 340,
-        y: 50,
-        width: 200,
-        height: 420,
-        parts: [
-          { type: "ellipse", x: 50, y: 70, width: 56, height: 56, fill: "violet", stroke: "violet", strokeWidth: 2.5, opacity: 1, text: "h₁", data: "circle" },
-          { type: "ellipse", x: 50, y: 150, width: 56, height: 56, fill: "violet", stroke: "violet", strokeWidth: 2.5, opacity: 1, text: "h₂", data: "circle" },
-          { type: "ellipse", x: 50, y: 230, width: 56, height: 56, fill: "violet", stroke: "violet", strokeWidth: 2.5, opacity: 1, text: "h₃", data: "circle" },
-          { type: "ellipse", x: 50, y: 310, width: 56, height: 56, fill: "violet", stroke: "violet", strokeWidth: 2.5, opacity: 1, text: "h₄", data: "circle" },
-        ],
-      };
-
-      const outputLayerObj: VisualObject = {
-        id: "nn-output-layer",
-        role: "output",
-        shapeType: "custom",
-        label: "Output Layer (Ŷ)",
-        labelPlacement: "above",
-        x: 620,
-        y: 80,
-        width: 180,
-        height: 360,
-        parts: [
-          { type: "ellipse", x: 45, y: 140, width: 64, height: 64, fill: "green", stroke: "green", strokeWidth: 2.5, opacity: 1, text: "ŷ", data: "circle" },
-        ],
-      };
-
-      const formulaObj: VisualObject = {
-        id: "nn-formula-loss",
-        role: "formula",
-        shapeType: "custom",
-        label: "Governing Learning Equations",
-        labelPlacement: "above",
-        x: 880,
-        y: 60,
-        width: 320,
-        height: 380,
-        parts: [
-          // Section 1: Forward Pass (Inference)
-          { type: "rect", x: 12, y: 55, width: 296, height: 75, fill: "none", stroke: "blue", strokeWidth: 1.5, opacity: 0.85, data: "", text: "" },
-          { type: "text", x: 160, y: 76, width: 280, height: 13, text: "Forward Inference:", fill: "cyan", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-          { type: "text", x: 160, y: 104, width: 280, height: 16, text: "ŷ = σ( W₂ · h + b )", fill: "white", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-
-          // Section 2: Loss & Backpropagation Update
-          { type: "rect", x: 12, y: 145, width: 296, height: 155, fill: "none", stroke: "green", strokeWidth: 1.5, opacity: 0.85, data: "", text: "" },
-          { type: "text", x: 160, y: 170, width: 280, height: 14, text: "Loss Function (MSE):", fill: "yellow", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-          { type: "text", x: 160, y: 196, width: 280, height: 16, text: "L = ½ ( y - ŷ )²", fill: "yellow", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-          { type: "text", x: 160, y: 232, width: 280, height: 13, text: "Backpropagation Gradient:", fill: "cyan", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-          { type: "text", x: 160, y: 262, width: 280, height: 18, text: "ΔW = -η · ( ∂L / ∂W )", fill: "green", stroke: "none", data: "", opacity: 1, strokeWidth: 0 },
-
-          // Footnote annotation
-          { type: "text", x: 160, y: 330, width: 280, height: 12, text: "η: learning rate  ·  σ: activation", fill: "slate", stroke: "none", data: "", opacity: 0.95, strokeWidth: 0 },
-        ],
-      };
-
-      // Discard raw fragmented or partial objects so only the 4 canonical components exist
-      plan.objects = [inputLayerObj, hiddenLayerObj, outputLayerObj, formulaObj];
-
-      plan.connections = [
-        {
-          id: "conn-in-to-hidden",
-          from: "nn-input-layer",
-          to: "nn-hidden-layer",
-          label: "weights W1",
-          color: "violet",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        },
-        {
-          id: "conn-hidden-to-out",
-          from: "nn-hidden-layer",
-          to: "nn-output-layer",
-          label: "weights W2",
-          color: "green",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        },
-        {
-          id: "conn-out-to-loss",
-          from: "nn-output-layer",
-          to: "nn-formula-loss",
-          label: "loss feedback",
-          color: "yellow",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        },
-      ];
-
-      // Synchronize teaching segments 1-to-1 with exact component targets and spoken narrations
-      plan.segments = [
-        {
-          id: "seg-nn-input",
-          title: "Input Layer Features",
-          targetIds: ["nn-input-layer"],
-          action: "reveal",
-          durationMs: 7500,
-          narration: "At the input layer, numerical feature values x₁ through x₃ enter the neural network as input signals.",
-        },
-        {
-          id: "seg-nn-hidden",
-          title: "Hidden Layer Processing",
-          targetIds: ["nn-hidden-layer"],
-          action: "focus",
-          durationMs: 8500,
-          narration: "These features flow across weighted connections into hidden neurons h₁ through h₄, where inputs are multiplied by weights W₁ and activated non-linearly.",
-        },
-        {
-          id: "seg-nn-output",
-          title: "Output Layer Prediction",
-          targetIds: ["nn-output-layer"],
-          action: "trace",
-          durationMs: 7500,
-          narration: "The activated hidden representations combine across weights W₂ into the output layer to compute the network's prediction, y-hat.",
-        },
-        {
-          id: "seg-nn-loss-backprop",
-          title: "Loss & Backpropagation",
-          targetIds: ["nn-formula-loss"],
-          action: "pulse",
-          durationMs: 9500,
-          narration: "Finally, the loss function evaluates error between prediction and true labels, and backpropagation calculates gradients to adjust weights by delta W, optimizing accuracy.",
-        },
-      ];
-    }
-
-  // 2. Astronomy & Celestial Mechanics: Consolidate fragmented pieces into unified living systems
-  // ONLY for the specific Moon-Earth orbital question when the LLM returned fragmented empty objects
-  const isMoonEarthQuestion =
-    /\b(why\s+(does\s+)?(the\s+)?moon\s+(doesn't|does\s+not|not)\s+fall|moon.*fall.*earth|moon\s+orbit.*(earth|gravity)|tangential\s+velocity.*moon)\b/i.test(qLower) &&
-    !/\b(sun|solar|eclipse|alignment|tides?|phase)\b/i.test(qLower);
-  const isFragmentedEmptyCelestial = isMoonEarthQuestion &&
-    plan.objects.length >= 2 &&
-    plan.objects.every((o) => !o.parts || o.parts.length === 0) &&
-    plan.objects.some((o) => /\b(moon|earth|orbit)\b/i.test(o.label) || /\b(moon|earth|orbit)\b/i.test(o.id));
-
-  if (isFragmentedEmptyCelestial && !plan.objects.some((o) => o.id === "moon-earth-orbital-system")) {
-      const masterOrbitId = "moon-earth-orbital-system";
-      const vectorBalanceId = "vector-force-balance";
-
-      const masterOrbitObj: VisualObject = {
-        id: masterOrbitId,
-        role: "subject",
-        shapeType: "custom",
-        label: "Moon-Earth Orbital Mechanics",
-        labelPlacement: "below",
-        x: 80,
-        y: 80,
-        width: 560,
-        height: 440,
-        parts: [
-          {
-            type: "orbit",
-            data: "celestial-moon-earth",
-            x: 20,
-            y: 20,
-            width: 520,
-            height: 400,
-            fill: "none",
-            stroke: "slate",
-            strokeWidth: 2,
-            opacity: 1,
-            text: "",
-          },
-        ],
-      };
-
-      const vectorBalanceObj: VisualObject = {
-        id: vectorBalanceId,
-        role: "component",
-        shapeType: "custom",
-        label: "Perpetual Free-Fall Principle",
-        labelPlacement: "below",
-        x: 680,
-        y: 120,
-        width: 360,
-        height: 320,
-        parts: [
-          {
-            type: "rect",
-            x: 10,
-            y: 10,
-            width: 340,
-            height: 300,
-            fill: "white",
-            stroke: "slate",
-            strokeWidth: 1.5,
-            opacity: 0.95,
-            text: "",
-            data: "",
-          },
-          {
-            type: "arrow",
-            x: 30,
-            y: 65,
-            width: 180,
-            height: 0,
-            fill: "none",
-            stroke: "cyan",
-            strokeWidth: 3,
-            opacity: 1,
-            text: "v (Tangential Velocity · 1.02 km/s)",
-            data: "velocity",
-          },
-          {
-            type: "arrow",
-            x: 30,
-            y: 140,
-            width: 180,
-            height: 0,
-            fill: "none",
-            stroke: "red",
-            strokeWidth: 3,
-            opacity: 1,
-            text: "Fg (Centripetal Gravity Pull)",
-            data: "gravity",
-          },
-          {
-            type: "wave",
-            x: 30,
-            y: 215,
-            width: 300,
-            height: 40,
-            fill: "none",
-            stroke: "yellow",
-            strokeWidth: 3,
-            opacity: 1,
-            text: "Curved Orbital Path (Perpetual Free-Fall)",
-            data: "2",
-          },
-        ],
-      };
-
-      // Replace fragmented objects with the two unified, cohesive pedagogical structures
-      plan.objects = [masterOrbitObj, vectorBalanceObj];
-
-      // Provide clean directional connection
-      plan.connections = [
-        {
-          id: "conn-orbit-to-vectors",
-          from: masterOrbitId,
-          to: vectorBalanceId,
-          label: "force balance",
-          color: "cyan",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        },
-      ];
-
-      // Remap all teaching segment targetIds to the consolidated objects
-      for (const seg of plan.segments) {
-        const titleLower = (seg.title || "").toLowerCase();
-        const narrLower = (seg.narration || "").toLowerCase();
-        if (
-          titleLower.includes("balance") ||
-          titleLower.includes("force") ||
-          titleLower.includes("free-fall") ||
-          titleLower.includes("vector") ||
-          narrLower.includes("balance") ||
-          narrLower.includes("equilibrium")
-        ) {
-          seg.targetIds = [vectorBalanceId, masterOrbitId];
-        } else {
-          seg.targetIds = [masterOrbitId];
-        }
-      }
-    }
-
-  // 2b. Astronomical / Celestial Reality Alignment: Solar & Lunar Eclipses, Planetary Alignments
-  const isEclipseTopic =
-    /\b(eclipse|syzygy|alignment\s+of\s+sun|sun.*earth.*moon|sun.*moon.*earth)\b/i.test(qLower) ||
-    plan.objects.some((o) => /\beclipse\b/i.test(o.label) || /\beclipse\b/i.test(o.id)) ||
-    plan.segments.some((s) => /\beclipse\b/i.test(s.title || "") || /\beclipse\b/i.test(s.narration || ""));
-
-  const sunObj = plan.objects.find((o) => /\bsun\b/i.test(o.id) || /\bsun\b/i.test(o.label));
-  const moonObj = plan.objects.find((o) => /\bmoon\b/i.test(o.id) || /\bmoon\b/i.test(o.label));
-  const earthObj = plan.objects.find((o) => /\bearth\b/i.test(o.id) || /\bearth\b/i.test(o.label));
-
-  if (isEclipseTopic && sunObj && moonObj && earthObj) {
-    // Detect whether Solar Eclipse or Lunar Eclipse
-    const allText = `${qLower} ${plan.title || ""} ${plan.summary || ""} ${plan.segments.map((s) => `${s.title} ${s.narration}`).join(" ")}`.toLowerCase();
-
-    // Explicit keywords
-    const isExplicitLunar = /\b(lunar\s+eclipse|eclipse\s+of\s+the\s+moon)\b/i.test(qLower) || (/\blunar\b/i.test(allText) && !/\bsolar\b/i.test(allText));
-    const isExplicitSolar = /\b(solar\s+eclipse|eclipse\s+of\s+the\s+sun)\b/i.test(qLower) || (/\bsolar\b/i.test(allText) && !/\blunar\b/i.test(allText));
-
-    const mentionsSolar = isExplicitSolar || /\b(moon\s+(is|moves|passes|comes|positioned)\s+between\s+(the\s+)?sun\s+and\s+(the\s+)?earth|shadow\s+on\s+earth|moon.*blocks.*sun)\b/i.test(allText);
-    const mentionsLunar = isExplicitLunar || /\b(earth\s+(is|moves|passes|comes|positioned)\s+between\s+(the\s+)?sun\s+and\s+(the\s+)?moon|earth.*casts.*shadow.*moon|shadow\s+on\s+moon)\b/i.test(allText);
-
-    const isSolar = !isExplicitLunar && (mentionsSolar || !mentionsLunar);
-
-    if (isSolar) {
-      // Physical Reality for Solar Eclipse:
-      // SUN (light emitter) -> MOON (blocking body in middle) -> EARTH (observer receiving shadow)
-      const minX = Math.max(80, Math.min(sunObj.x, moonObj.x, earthObj.x));
-      const sunWidth = Math.max(160, sunObj.width);
-      const moonWidth = Math.max(120, moonObj.width);
-      const earthWidth = Math.max(160, earthObj.width);
-
-      sunObj.width = sunWidth;
-      sunObj.height = Math.max(160, sunObj.height);
-      moonObj.width = moonWidth;
-      moonObj.height = Math.max(120, moonObj.height);
-      earthObj.width = earthWidth;
-      earthObj.height = Math.max(160, earthObj.height);
-
-      sunObj.x = minX;
-      moonObj.x = sunObj.x + sunObj.width + 120;
-      earthObj.x = moonObj.x + moonObj.width + 120;
-
-      const centerY = Math.max(140, Math.min(sunObj.y, moonObj.y, earthObj.y));
-      sunObj.y = centerY;
-      moonObj.y = centerY + (sunObj.height - moonObj.height) / 2;
-      earthObj.y = centerY + (sunObj.height - earthObj.height) / 2;
-
-      // Ensure connections reflect physical solar eclipse ray/shadow paths:
-      // 1. Sun emits light to Moon
-      // 2. Moon casts shadow onto Earth
-      let hasSunToMoon = false;
-      let hasMoonToEarth = false;
-
-      for (const conn of plan.connections) {
-        if (conn.from === sunObj.id && conn.to === earthObj.id) {
-          conn.to = moonObj.id;
-          conn.label = "sunlight";
-          conn.color = "yellow";
-          hasSunToMoon = true;
-        } else if (conn.from === earthObj.id && conn.to === moonObj.id) {
-          // Earth cannot cast shadow on Moon during solar eclipse!
-          conn.from = moonObj.id;
-          conn.to = earthObj.id;
-          conn.label = "shadow";
-          conn.color = "cyan";
-          hasMoonToEarth = true;
-        } else if (conn.from === sunObj.id && conn.to === moonObj.id) {
-          conn.label = "sunlight";
-          conn.color = "yellow";
-          hasSunToMoon = true;
-        } else if (conn.from === moonObj.id && conn.to === earthObj.id) {
-          conn.label = "shadow";
-          conn.color = "cyan";
-          hasMoonToEarth = true;
-        }
-      }
-
-      if (!hasSunToMoon) {
-        plan.connections.push({
-          id: `conn-sun-to-moon-${Date.now()}`,
-          from: sunObj.id,
-          to: moonObj.id,
-          label: "sunlight",
-          color: "yellow",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        });
-      }
-      if (!hasMoonToEarth) {
-        plan.connections.push({
-          id: `conn-moon-to-earth-${Date.now()}`,
-          from: moonObj.id,
-          to: earthObj.id,
-          label: "shadow",
-          color: "cyan",
-          route: "straight",
-          fromAnchor: "right",
-          toAnchor: "left",
-          arrowhead: "arrow",
-          bend: 0,
-        });
-      }
-    } else {
-      // Physical Reality for Lunar Eclipse:
-      // SUN (light emitter) -> EARTH (blocking body in middle) -> MOON (in shadow)
-      const minX = Math.max(80, Math.min(sunObj.x, moonObj.x, earthObj.x));
-      const sunWidth = Math.max(160, sunObj.width);
-      const earthWidth = Math.max(160, earthObj.width);
-      const moonWidth = Math.max(120, moonObj.width);
-
-      sunObj.width = sunWidth;
-      sunObj.height = Math.max(160, sunObj.height);
-      earthObj.width = earthWidth;
-      earthObj.height = Math.max(160, earthObj.height);
-      moonObj.width = moonWidth;
-      moonObj.height = Math.max(120, moonObj.height);
-
-      sunObj.x = minX;
-      earthObj.x = sunObj.x + sunObj.width + 120;
-      moonObj.x = earthObj.x + earthObj.width + 120;
-
-      const centerY = Math.max(140, Math.min(sunObj.y, moonObj.y, earthObj.y));
-      sunObj.y = centerY;
-      earthObj.y = centerY + (sunObj.height - earthObj.height) / 2;
-      moonObj.y = centerY + (sunObj.height - moonObj.height) / 2;
-
-      for (const conn of plan.connections) {
-        if (conn.from === moonObj.id && conn.to === earthObj.id) {
-          conn.from = earthObj.id;
-          conn.to = moonObj.id;
-          conn.label = "shadow";
-          conn.color = "cyan";
-        }
-      }
+  // 2. Domain-agnostic visual repair (no domain-specific hardcoded coordinate hijacking)
+  const templateObj = plan.objects.find((o) => o.shapeType === "custom-template");
+  if (templateObj && plan.objects.length > 1) {
+    // An all-in-one custom-template card already incorporates all components internally
+    plan.objects = [templateObj];
+    plan.connections = [];
+    for (const seg of plan.segments) {
+      seg.targetIds = [templateObj.id];
     }
   }
 
@@ -1019,289 +578,421 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     };
   });
 
-  // 2. Identify pedagogical sequence and direct connections for flow-aware orientation
-  const pedagogicalOrder = new Map<string, number>();
-  let stepOrder = 0;
-  for (const seg of plan.segments) {
-    for (const tId of seg.targetIds) {
-      const mappedId = idMap.get(tId) ?? tId;
-      if (!pedagogicalOrder.has(mappedId)) {
-        pedagogicalOrder.set(mappedId, stepOrder++);
-      }
+  // 2. Universal Topological & Stage-Based Spatial Engine (Domain-Agnostic)
+  // Map connections using idMap
+  const mappedConnections = plan.connections.map((c) => ({
+    ...c,
+    from: idMap.get(c.from) ?? c.from,
+    to: idMap.get(c.to) ?? c.to,
+  }));
+
+  // Classify objects by intrinsic pedagogical role
+  const containers: VisualObject[] = [];
+  const formulas: VisualObject[] = [];
+  const functional: VisualObject[] = [];
+
+  for (const obj of sanitizedObjects) {
+    const isFormula =
+      obj.role === "formula" ||
+      (obj.role === "annotation" && obj.shapeType === "note") ||
+      obj.shapeType === "note" ||
+      /^(formula|equation|governing equation|learning equation|loss equation)/i.test(obj.label.trim());
+
+    const isContainer = BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame";
+
+    if (isFormula) {
+      formulas.push(obj);
+    } else if (isContainer) {
+      containers.push(obj);
+    } else {
+      functional.push(obj);
     }
   }
 
-  const directConnections = new Set<string>();
-  for (const conn of plan.connections) {
-    const fromId = idMap.get(conn.from);
-    const toId = idMap.get(conn.to);
-    if (fromId && toId && fromId !== toId) {
-      directConnections.add(`${fromId}->${toId}`);
-    }
-  }
+  // Parent-child containment detection (e.g. neurons in a layer, gates in an ALU)
+  const childToContainer = new Map<string, string>();
+  const containerToChildren = new Map<string, VisualObject[]>();
 
-  // 3. Separate backdrops (containers, environments, frames) from functional objects
-  const nonBackdrops = sanitizedObjects.filter((o) => !BACKDROP_ROLES.has(o.role) && o.shapeType !== "frame");
-  const backdrops = sanitizedObjects.filter((o) => BACKDROP_ROLES.has(o.role) || o.shapeType === "frame");
-
-  // Sort non-backdrops by their spatial coordinates (preserving physical layout)
-  nonBackdrops.sort((a, b) => {
-    if (Math.abs(a.x - b.x) > 10) return a.x - b.x;
-    return a.y - b.y;
-  });
-
-  // 4. Determine parent-child relationships between containers and their children
-  //    A child is "contained" if the LLM originally placed its center inside/near the container,
-  //    or if it shares a direct connection with other children of the same container.
-  const childToParent = new Map<string, string>();
-  const parentToChildren = new Map<string, VisualObject[]>();
-
-  for (const container of backdrops) {
+  for (const c of containers) {
     const children: VisualObject[] = [];
-    for (const child of nonBackdrops) {
-      // Check if the child's original position was inside or near the container
-      const origChild = plan.objects.find((o) => idMap.get(o.id) === child.id);
-      const origContainer = plan.objects.find((o) => idMap.get(o.id) === container.id);
-      if (!origChild || !origContainer) continue;
-      const cx = origChild.x + origChild.width / 2;
-      const cy = origChild.y + origChild.height / 2;
-      const inside = cx >= origContainer.x - 60 && cx <= origContainer.x + origContainer.width + 60
-                  && cy >= origContainer.y - 60 && cy <= origContainer.y + origContainer.height + 60;
-      if (inside && !childToParent.has(child.id)) {
-        children.push(child);
-        childToParent.set(child.id, container.id);
+    for (const f of functional) {
+      const cx = f.x + f.width / 2;
+      const cy = f.y + f.height / 2;
+      const inside = cx >= c.x - 30 && cx <= c.x + c.width + 30 && cy >= c.y - 30 && cy <= c.y + c.height + 30;
+      const nameMatch = f.id.toLowerCase().includes(c.id.toLowerCase()) || (c.id.includes("layer") && f.id.includes("neuron"));
+      if ((inside || nameMatch) && !childToContainer.has(f.id)) {
+        children.push(f);
+        childToContainer.set(f.id, c.id);
       }
-    }
-    // If this container wraps only 1 child and has essentially the same label as the child,
-    // it's a redundant duplicate enclosure!
-    const contLabel = container.label.trim().toLowerCase().replace(/\s+(system|container|box|enclosure|frame)\b/g, "");
-    const childLabel = children[0]?.label.trim().toLowerCase();
-    if (children.length === 1 && (contLabel === childLabel || container.label.trim().toLowerCase() === childLabel)) {
-      childToParent.delete(children[0].id);
-      continue;
     }
     if (children.length > 0) {
-      parentToChildren.set(container.id, children);
-    }
-  }
+      containerToChildren.set(c.id, children);
+      // Layout children inside container:
+      // If container is a layer of neurons/nodes, stack vertically.
+      // Otherwise, lay out components/stages horizontally across rows.
+      const isNeuralLayer =
+        c.id.toLowerCase().includes("layer") &&
+        children.some(
+          (ch) =>
+            ch.id.toLowerCase().includes("neuron") ||
+            ch.id.toLowerCase().includes("node") ||
+            /^[xhŷ]\d*$/i.test(ch.label.trim()) ||
+            ch.parts.some((p) => p.type === "ellipse")
+        );
 
-  // 5. Sequential grid layout for children inside each container
-  //    Place children in a clean horizontal row with generous spacing,
-  //    then size the container to wrap them with padding.
-  const CHILD_H_GAP = 60;
-  const CHILD_V_GAP = 40;
-  const CONTAINER_PAD_X = 50;
-  const CONTAINER_PAD_Y = 64;
-  const CONTAINER_PAD_TOP = 80; // Extra top padding for the container label
+      if (isNeuralLayer) {
+        let curY = 64; // Clearance for container header/pill
+        let maxW = 0;
+        for (const ch of children) {
+          ch.x = 24;
+          ch.y = curY;
+          curY += ch.height + 20;
+          maxW = Math.max(maxW, ch.width);
+        }
+        c.width = Math.max(c.width, maxW + 48);
+        c.height = Math.max(c.height, curY + 24);
+      } else {
+        // Horizontal flow of components/stages inside container (e.g. CPU chip stages, machine parts)
+        const CHILD_H_GAP = 56;
+        const CHILD_V_GAP = 28;
+        const CONTAINER_PAD_X = 40;
+        const CONTAINER_PAD_TOP = 64;
+        const maxW = 1000;
 
-  for (const [containerId, children] of parentToChildren.entries()) {
-    const container = backdrops.find((o) => o.id === containerId);
-    if (!container || children.length === 0) continue;
+        let curX = CONTAINER_PAD_X;
+        let curY = CONTAINER_PAD_TOP;
+        let rowH = 0;
+        let maxRowW = 0;
 
-    // Sort children by spatial coordinates (left-to-right, then top-to-bottom)
-    children.sort((a, b) => {
-      if (Math.abs(a.x - b.x) > 10) return a.x - b.x;
-      return a.y - b.y;
-    });
-
-    // Determine if children fit in a single row or need wrapping
-    const totalChildWidth = children.reduce((sum, c) => sum + c.width, 0);
-    const totalGaps = (children.length - 1) * CHILD_H_GAP;
-    const neededWidth = totalChildWidth + totalGaps + 2 * CONTAINER_PAD_X;
-
-    const maxContainerWidth = CANVAS_WIDTH - 2 * EDGE;
-    const useMultiRow = neededWidth > maxContainerWidth && children.length > 2;
-    const cols = useMultiRow ? Math.ceil(children.length / 2) : children.length;
-
-    // Arrange children in a grid
-    let cursorX = CONTAINER_PAD_X;
-    let cursorY = CONTAINER_PAD_TOP;
-    let col = 0;
-    let rowMaxHeight = 0;
-
-    for (const child of children) {
-      if (col >= cols) {
-        // New row
-        col = 0;
-        cursorX = CONTAINER_PAD_X;
-        cursorY += rowMaxHeight + CHILD_V_GAP;
-        rowMaxHeight = 0;
-      }
-      child.x = cursorX;
-      child.y = cursorY;
-      cursorX += child.width + CHILD_H_GAP;
-      rowMaxHeight = Math.max(rowMaxHeight, child.height);
-      col++;
-    }
-
-    // Now size the container to tightly wrap all children
-    const minChildX = Math.min(...children.map((c) => c.x));
-    const maxChildX = Math.max(...children.map((c) => c.x + c.width));
-    const minChildY = Math.min(...children.map((c) => c.y));
-    const maxChildY = Math.max(...children.map((c) => c.y + c.height));
-
-    const containerW = clamp(maxChildX - minChildX + 2 * CONTAINER_PAD_X, 480, maxContainerWidth);
-    const containerH = clamp(maxChildY - minChildY + CONTAINER_PAD_TOP + CONTAINER_PAD_Y, 320, CANVAS_HEIGHT - 2 * EDGE);
-
-    container.width = containerW;
-    container.height = containerH;
-
-    // Temporarily position container at origin; children are in local coords
-    container.x = EDGE;
-    container.y = EDGE;
-
-    // Convert children from local container coords to absolute canvas coords
-    for (const child of children) {
-      child.x = container.x + child.x;
-      child.y = container.y + child.y;
-    }
-  }
-
-  // 6. Identify "free" non-backdrop objects (not inside any container)
-  const freeObjects = nonBackdrops.filter((o) => !childToParent.has(o.id));
-
-  // 7. Flow-aware sequential alignment for free objects
-  for (let i = 0; i < freeObjects.length; i++) {
-    for (let j = i + 1; j < freeObjects.length; j++) {
-      const a = freeObjects[i];
-      const b = freeObjects[j];
-      if (directConnections.has(`${a.id}->${b.id}`)) {
-        const isVertical = Math.abs(b.y - a.y) > Math.abs(b.x - a.x) * 1.2;
-        if (isVertical) {
-          if (b.y >= a.y) {
-            // Downward flow (top to bottom)
-            if (b.y < a.y + a.height + 36) {
-              b.y = a.y + a.height + 48;
-            }
-          } else {
-            // Upward flow (bottom to top)
-            if (b.y > a.y - b.height - 36) {
-              b.y = a.y - b.height - 48;
-            }
+        for (let i = 0; i < children.length; i++) {
+          const ch = children[i];
+          if (curX + ch.width + CONTAINER_PAD_X > maxW && i > 0) {
+            curX = CONTAINER_PAD_X;
+            curY += rowH + CHILD_V_GAP;
+            rowH = 0;
           }
-        } else {
-          // b is directly downstream of a — enforce left-to-right
-          if (b.x < a.x + a.width + 48) {
-            b.x = a.x + a.width + 60;
-            if (Math.abs(b.y - a.y) < 60) {
-              b.y = a.y + (a.height - b.height) / 2;
-            }
+          ch.x = curX;
+          ch.y = curY;
+          curX += ch.width + CHILD_H_GAP;
+          rowH = Math.max(rowH, ch.height);
+          maxRowW = Math.max(maxRowW, curX);
+        }
+
+        c.width = Math.max(c.width, maxRowW + CONTAINER_PAD_X - CHILD_H_GAP);
+        c.height = Math.max(c.height, curY + rowH + 32);
+      }
+    }
+  }
+
+  // Top-level functional units: containers (with children or standalone parts) + standalone functional objects
+  const topLevelUnits: VisualObject[] = [
+    ...containers.filter((c) => (containerToChildren.get(c.id)?.length || 0) > 0 || (c.parts && c.parts.length > 0)),
+    ...functional.filter((f) => !childToContainer.has(f.id)),
+  ];
+
+  // Graph Topological Ranking
+  const idToUnit = new Map<string, VisualObject>();
+  for (const u of topLevelUnits) idToUnit.set(u.id, u);
+  for (const [cId, children] of containerToChildren.entries()) {
+    const parent = idToUnit.get(cId);
+    if (parent) {
+      for (const ch of children) idToUnit.set(ch.id, parent);
+    }
+  }
+
+  const adj = new Map<string, Set<string>>();
+  const inDegree = new Map<string, number>();
+  for (const u of topLevelUnits) {
+    adj.set(u.id, new Set<string>());
+    inDegree.set(u.id, 0);
+  }
+
+  for (const conn of mappedConnections) {
+    const fromUnit = idToUnit.get(conn.from);
+    const toUnit = idToUnit.get(conn.to);
+    if (fromUnit && toUnit && fromUnit.id !== toUnit.id) {
+      if (!adj.get(fromUnit.id)!.has(toUnit.id)) {
+        adj.get(fromUnit.id)!.add(toUnit.id);
+        inDegree.set(toUnit.id, (inDegree.get(toUnit.id) || 0) + 1);
+      }
+    }
+  }
+
+  // Calculate topological ranks (longest path from sources, cycle breaking)
+  const ranks = new Map<string, number>();
+  for (const u of topLevelUnits) ranks.set(u.id, 0);
+
+  for (let iter = 0; iter < topLevelUnits.length; iter++) {
+    let changed = false;
+    for (const u of topLevelUnits) {
+      const uRank = ranks.get(u.id) || 0;
+      for (const vId of adj.get(u.id) || []) {
+        const vRank = ranks.get(vId) || 0;
+        if (vRank < uRank + 1 && uRank + 1 < topLevelUnits.length) {
+          ranks.set(vId, uRank + 1);
+          changed = true;
+        }
+      }
+    }
+    if (!changed) break;
+  }
+
+  let maxRank = Math.max(0, ...Array.from(ranks.values()));
+
+  // If all units have rank 0 (e.g. parallel entities or disconnected graph), distribute horizontally across up to 4 columns based on initial X
+  if (maxRank === 0 && topLevelUnits.length > 1) {
+    const sorted = [...topLevelUnits].sort((a, b) => a.x - b.x);
+    const targetCols = Math.min(sorted.length, Math.min(4, Math.ceil(Math.sqrt(sorted.length * 2))));
+    const itemsPerCol = Math.ceil(sorted.length / targetCols);
+    for (let i = 0; i < sorted.length; i++) {
+      const colIdx = Math.floor(i / itemsPerCol);
+      ranks.set(sorted[i].id, colIdx);
+    }
+    maxRank = Math.max(0, ...Array.from(ranks.values()));
+  }
+
+  const numLevels = Math.max(1, maxRank + 1);
+
+  // Group units by rank
+  const rankGroups: VisualObject[][] = Array.from({ length: numLevels }, () => []);
+  for (const u of topLevelUnits) {
+    const r = Math.min(numLevels - 1, ranks.get(u.id) || 0);
+    rankGroups[r].push(u);
+  }
+
+  for (const grp of rankGroups) {
+    grp.sort((a, b) => a.y - b.y);
+  }
+
+  // Determine dominant flow orientation from connections and initial coordinates (pure geometry)
+  let verticalScore = 0;
+  let horizontalScore = 0;
+
+  for (const conn of plan.connections) {
+    const fromObj = plan.objects.find((o) => o.id === conn.from);
+    const toObj = plan.objects.find((o) => o.id === conn.to);
+    if (!fromObj || !toObj) continue;
+
+    const dx = Math.abs((toObj.x + toObj.width / 2) - (fromObj.x + fromObj.width / 2));
+    const dy = Math.abs((toObj.y + toObj.height / 2) - (fromObj.y + fromObj.height / 2));
+
+    const isExplicitVerticalAnchor =
+      (conn.fromAnchor === "top" || conn.fromAnchor === "bottom") &&
+      (conn.toAnchor === "top" || conn.toAnchor === "bottom");
+
+    if (isExplicitVerticalAnchor || dy > dx * 1.5) {
+      verticalScore++;
+    } else {
+      horizontalScore++;
+    }
+  }
+
+  const isVerticalFlow =
+    (plan.diagramType as string) === "stack" ||
+    (plan.diagramType as string) === "layers" ||
+    (verticalScore > horizontalScore && verticalScore >= 2);
+
+  if (isVerticalFlow) {
+    // Vertical flow (e.g. atmospheric layers, water columns, vertical stacks)
+    const rowHeight = USABLE_H / numLevels;
+    const rank0Y = rankGroups[0]?.[0]?.y ?? 0;
+    const lastRankY = rankGroups[numLevels - 1]?.[0]?.y ?? 0;
+    const invertVertical = rank0Y > lastRankY;
+
+    for (let r = 0; r < numLevels; r++) {
+      const grp = rankGroups[r];
+      if (grp.length === 0) continue;
+
+      const effectiveRow = invertVertical ? numLevels - 1 - r : r;
+      const rowCenterY = EDGE + (effectiveRow + 0.5) * rowHeight;
+      const totalGrpW = grp.reduce((sum, u) => sum + u.width, 0) + (grp.length - 1) * 28;
+      let curX = Math.max(EDGE, EDGE + (USABLE_W - totalGrpW) / 2);
+
+      for (const u of grp) {
+        u.x = Math.round(curX);
+        u.y = Math.round(rowCenterY - u.height / 2);
+        curX += u.width + 28;
+
+        const children = containerToChildren.get(u.id);
+        if (children) {
+          for (const ch of children) {
+            ch.x = u.x + ch.x;
+            ch.y = u.y + ch.y;
           }
         }
       }
     }
+  } else {
+    // Horizontal stage columns (standard for pipelines, neural networks, causal cycles, circuits, celestial bodies)
+    const hasFormulas = formulas.length > 0;
+    const functionalUsableH = hasFormulas ? USABLE_H - 180 : USABLE_H;
+    const colWidth = USABLE_W / numLevels;
+
+    for (let r = 0; r < numLevels; r++) {
+      const grp = rankGroups[r];
+      if (grp.length === 0) continue;
+
+      const colCenterX = EDGE + (r + 0.5) * colWidth;
+      const totalGrpH = grp.reduce((sum, u) => sum + u.height, 0) + (grp.length - 1) * 28;
+      let curY = Math.max(EDGE, EDGE + (functionalUsableH - totalGrpH) / 2);
+
+      for (const u of grp) {
+        u.x = Math.round(colCenterX - u.width / 2);
+        u.y = Math.round(curY);
+        curY += u.height + 28;
+
+        const children = containerToChildren.get(u.id);
+        if (children) {
+          for (const ch of children) {
+            ch.x = u.x + ch.x;
+            ch.y = u.y + ch.y;
+          }
+        }
+      }
+    }
+
+    // Place Formula / Annotation Cards in Dedicated Bottom Ribbon
+    if (hasFormulas) {
+      const totalFormulaW = formulas.reduce((sum, f) => sum + f.width, 0) + (formulas.length - 1) * 32;
+      let formulaStartX = Math.max(EDGE, Math.round((CANVAS_WIDTH - totalFormulaW) / 2));
+      const formulaY = Math.round(CANVAS_HEIGHT - EDGE - Math.max(...formulas.map((f) => f.height)));
+
+      for (const f of formulas) {
+        f.x = formulaStartX;
+        f.y = formulaY;
+        formulaStartX += f.width + 32;
+      }
+    }
   }
 
-  // 8. Iterative collision relaxation for ALL non-backdrop objects
-  for (let iter = 0; iter < 30; iter++) {
+  // Multi-Pass AABB Collision Relaxation (Guaranteed 0 Collisions)
+  const allTopItems: VisualObject[] = [...topLevelUnits, ...formulas];
+
+  for (let iter = 0; iter < 50; iter++) {
     let shifted = false;
-    for (let i = 0; i < nonBackdrops.length; i++) {
-      for (let j = i + 1; j < nonBackdrops.length; j++) {
-        const a = nonBackdrops[i];
-        const b = nonBackdrops[j];
-        // Skip collision check between objects that share the same container
-        // (they were already laid out in step 5 without overlap)
-        const sameContainer = childToParent.get(a.id) && childToParent.get(a.id) === childToParent.get(b.id);
-        if (sameContainer) continue;
-        if (overlaps(a, b, 48)) {
+    for (let i = 0; i < allTopItems.length; i++) {
+      for (let j = i + 1; j < allTopItems.length; j++) {
+        const a = allTopItems[i];
+        const b = allTopItems[j];
+        const gap = 24;
+
+        const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + gap;
+        const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + gap;
+
+        if (overlapX > 0 && overlapY > 0) {
           shifted = true;
-          const aToB = directConnections.has(`${a.id}->${b.id}`);
-          const bToA = directConnections.has(`${b.id}->${a.id}`);
-          resolveCollision(a, b, aToB, bToA, 56);
+          if (overlapX <= overlapY) {
+            const shift = Math.ceil(overlapX / 2);
+            if (b.x >= a.x) {
+              b.x += shift;
+              a.x -= shift;
+            } else {
+              a.x += shift;
+              b.x -= shift;
+            }
+          } else {
+            const shift = Math.ceil(overlapY / 2);
+            if (b.y >= a.y) {
+              b.y += shift;
+              a.y -= shift;
+            } else {
+              a.y += shift;
+              b.y -= shift;
+            }
+          }
+
+          // Propagate shifts to children
+          if (containerToChildren.has(a.id)) {
+            const children = containerToChildren.get(a.id)!;
+            const minChX = Math.min(...children.map((c) => c.x));
+            const minChY = Math.min(...children.map((c) => c.y));
+            const dx = a.x + 24 - minChX;
+            const dy = a.y + 64 - minChY;
+            for (const ch of children) {
+              ch.x += dx;
+              ch.y += dy;
+            }
+          }
+          if (containerToChildren.has(b.id)) {
+            const children = containerToChildren.get(b.id)!;
+            const minChX = Math.min(...children.map((c) => c.x));
+            const minChY = Math.min(...children.map((c) => c.y));
+            const dx = b.x + 24 - minChX;
+            const dy = b.y + 64 - minChY;
+            for (const ch of children) {
+              ch.x += dx;
+              ch.y += dy;
+            }
+          }
         }
       }
     }
     if (!shifted) break;
   }
 
-  // 9. Post-collision: Re-fit containers to enclose their children
-  for (const [containerId, children] of parentToChildren.entries()) {
-    const container = backdrops.find((o) => o.id === containerId);
-    if (!container || children.length === 0) continue;
+  // Global Proportional Fit & Centering (GUARANTEE 16:9 CANVAS FIT)
+  const allFinalObjects: VisualObject[] = [
+    ...topLevelUnits,
+    ...formulas,
+    ...Array.from(containerToChildren.values()).flat(),
+  ];
+  const uniqueMap = new Map<string, VisualObject>();
+  for (const o of allFinalObjects) uniqueMap.set(o.id, o);
+  const unique = Array.from(uniqueMap.values());
 
-    const minChildX = Math.min(...children.map((c) => c.x));
-    const maxChildX = Math.max(...children.map((c) => c.x + c.width));
-    const minChildY = Math.min(...children.map((c) => c.y));
-    const maxChildY = Math.max(...children.map((c) => c.y + c.height));
+  let minX = Math.min(...unique.map((o) => o.x));
+  let maxX = Math.max(...unique.map((o) => o.x + o.width));
+  let minY = Math.min(...unique.map((o) => o.y));
+  let maxY = Math.max(...unique.map((o) => o.y + o.height));
+  let totalW = maxX - minX;
+  let totalH = maxY - minY;
 
-    container.x = clamp(minChildX - CONTAINER_PAD_X, EDGE, CANVAS_WIDTH - 200);
-    container.y = clamp(minChildY - CONTAINER_PAD_TOP, EDGE, CANVAS_HEIGHT - 200);
-    container.width = clamp(maxChildX - container.x + CONTAINER_PAD_X, 480, CANVAS_WIDTH - container.x - EDGE);
-    container.height = clamp(maxChildY - container.y + CONTAINER_PAD_Y, 320, CANVAS_HEIGHT - container.y - EDGE);
-  }
+  const scaleX = USABLE_W / Math.max(1, totalW);
+  const scaleY = USABLE_H / Math.max(1, totalH);
+  const scale = Math.min(1.0, scaleX, scaleY);
 
-  // 10. Handle free backdrops (no children from initial layout)
-  for (const backdrop of backdrops) {
-    if (parentToChildren.has(backdrop.id)) continue;
-    const hasMeaningfulParts = backdrop.parts && backdrop.parts.length > 0 && backdrop.parts.some((p) => p.text || p.data || (p.fill && p.fill !== "none" && p.fill !== "slate"));
-    const minRequiredNeighbors = hasMeaningfulParts ? 1 : 2;
+  if (scale < 1.0) {
+    const centerX = minX + totalW / 2;
+    const centerY = minY + totalH / 2;
 
-    // Place behind all non-backdrops that are near it
-    const nearChildren = nonBackdrops.filter((child) => {
-      const cx = child.x + child.width / 2;
-      const cy = child.y + child.height / 2;
-      return cx >= backdrop.x - 80 && cx <= backdrop.x + backdrop.width + 80
-          && cy >= backdrop.y - 80 && cy <= backdrop.y + backdrop.height + 80;
-    });
-    if (nearChildren.length >= minRequiredNeighbors) {
-      parentToChildren.set(backdrop.id, nearChildren);
-      const minChildX = Math.min(...nearChildren.map((c) => c.x));
-      const maxChildX = Math.max(...nearChildren.map((c) => c.x + c.width));
-      const minChildY = Math.min(...nearChildren.map((c) => c.y));
-      const maxChildY = Math.max(...nearChildren.map((c) => c.y + c.height));
-      backdrop.x = clamp(minChildX - CONTAINER_PAD_X, EDGE, CANVAS_WIDTH - 200);
-      backdrop.y = clamp(minChildY - CONTAINER_PAD_TOP, EDGE, CANVAS_HEIGHT - 200);
-      backdrop.width = clamp(maxChildX - backdrop.x + CONTAINER_PAD_X, 480, CANVAS_WIDTH - backdrop.x - EDGE);
-      backdrop.height = clamp(maxChildY - backdrop.y + CONTAINER_PAD_Y, 320, CANVAS_HEIGHT - backdrop.y - EDGE);
+    for (const o of unique) {
+      o.width = Math.round(o.width * scale);
+      o.height = Math.round(o.height * scale);
+      o.x = Math.round(centerX + (o.x - centerX) * scale);
+      o.y = Math.round(centerY + (o.y - centerY) * scale);
     }
+
+    minX = Math.min(...unique.map((o) => o.x));
+    maxX = Math.max(...unique.map((o) => o.x + o.width));
+    minY = Math.min(...unique.map((o) => o.y));
+    maxY = Math.max(...unique.map((o) => o.y + o.height));
+    totalW = maxX - minX;
+    totalH = maxY - minY;
   }
 
-  // 11. Center the whole composition on the canvas
-  // Filter out empty backdrops that have no children and no meaningful visual parts
-  const activeBackdrops = backdrops.filter((b) => {
-    const hasChildren = (parentToChildren.get(b.id)?.length ?? 0) > 0;
-    if (hasChildren) return true;
-    const hasParts = b.parts && b.parts.length > 0 && b.parts.some((p) => p.text || p.data || (p.fill && p.fill !== "none" && p.fill !== "slate"));
-    return Boolean(hasParts);
-  });
-  const allObjects = [...activeBackdrops, ...nonBackdrops];
-  if (allObjects.length > 0) {
-    const minX = Math.min(...allObjects.map((o) => o.x));
-    const maxX = Math.max(...allObjects.map((o) => o.x + o.width));
-    const minY = Math.min(...allObjects.map((o) => o.y));
-    const maxY = Math.max(...allObjects.map((o) => o.y + o.height));
-    const totalW = maxX - minX;
-    const totalH = maxY - minY;
+  // Center within 1280x720 canvas
+  const shiftX = Math.round((CANVAS_WIDTH - totalW) / 2 - minX);
+  const shiftY = Math.round((CANVAS_HEIGHT - totalH) / 2 - minY);
 
-    if (totalW < CANVAS_WIDTH - 2 * EDGE) {
-      const shiftX = Math.round((CANVAS_WIDTH - totalW) / 2 - minX);
-      for (const obj of allObjects) obj.x += shiftX;
-    }
-    if (totalH < CANVAS_HEIGHT - 2 * EDGE) {
-      const shiftY = Math.round((CANVAS_HEIGHT - totalH) / 2 - minY);
-      for (const obj of allObjects) obj.y += shiftY;
-    }
+  for (const o of unique) {
+    o.x += shiftX;
+    o.y += shiftY;
   }
 
-  // 12. Final clamping — make sure nothing is off-canvas
-  for (const obj of allObjects) {
-    obj.x = Math.max(EDGE, obj.x);
-    obj.y = Math.max(EDGE, obj.y);
-  }
-
-  const unique = allObjects;
   const validUniqueIds = new Set(unique.map((o) => o.id));
-
   const connectionIds = new Set<string>();
+
   const connections = plan.connections.flatMap((connection, index) => {
-    const from = idMap.get(connection.from);
-    const to = idMap.get(connection.to);
+    const from = idMap.get(connection.from) ?? connection.from;
+    const to = idMap.get(connection.to) ?? connection.to;
     if (!from || !to || from === to) return [];
+
     const baseId = `link-${safeId(connection.id, String(index + 1))}`;
     let connectionId = baseId;
     let suffix = 2;
     while (ids.has(connectionId) || connectionIds.has(connectionId)) connectionId = `${baseId.slice(0, 50)}-${suffix++}`;
     connectionIds.add(connectionId);
+
     const fromObject = unique.find((object) => object.id === from);
     const toObject = unique.find((object) => object.id === to);
     if (!fromObject || !toObject) return [];
@@ -1312,22 +1003,17 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
       ? { fromAnchor: dx >= 0 ? "right" as const : "left" as const, toAnchor: dx >= 0 ? "left" as const : "right" as const }
       : { fromAnchor: dy >= 0 ? "bottom" as const : "top" as const, toAnchor: dy >= 0 ? "top" as const : "bottom" as const };
 
-    // Strip cluttering verbose labels on arrows (e.g. "USB to Controller Flow" -> "")
-    // Only keep short 1-word identifiers (e.g. "charge", "data", "tunnel")
-    let rawLabel = connection.label.replace(/[<>]/g, "").trim();
-    if (/\b(to|flow|arrow|link|step)\b/i.test(rawLabel) || rawLabel.length > 12) {
-      rawLabel = "";
-    }
+    const rawLabel = (connection.label || "").replace(/[<>]/g, "").trim().slice(0, 24);
 
     return [{
       ...connection,
       id: connectionId,
       from,
       to,
-      label: rawLabel.slice(0, 16),
+      label: rawLabel,
       route: connection.route === "curve" ? "curve" as const : "elbow" as const,
       ...(connection.route === "curve" ? {} : automaticAnchors),
-      bend: clamp(connection.bend, -160, 160),
+      bend: clamp(connection.bend || 0, -160, 160),
     }];
   });
 

@@ -1,5 +1,4 @@
 import { repairAndValidateLessonPlan, normalizeLessonLayout } from "../lib/lesson-layout.ts";
-import { applyElkLayout } from "../lib/elk-spatial-layout.ts";
 
 console.log("=================================================================");
 console.log("TEST 1: SOLAR ECLIPSE PHYSICAL REALITY ALIGNMENT");
@@ -22,8 +21,8 @@ const solarEclipsePlan = {
     { id: "moon", role: "component", shapeType: "custom", label: "Moon", x: 750, y: 160, width: 140, height: 140, parts: [] },
   ],
   connections: [
-    { id: "c1", from: "sun", to: "earth", label: "sunlight", color: "yellow", route: "straight", fromAnchor: "right", toAnchor: "left", arrowhead: "arrow", bend: 0 },
-    { id: "c2", from: "earth", to: "moon", label: "shadow", color: "blue", route: "straight", fromAnchor: "right", toAnchor: "left", arrowhead: "arrow", bend: 0 },
+    { id: "c1", from: "sun", to: "moon", label: "sunlight", color: "yellow", route: "straight", fromAnchor: "right", toAnchor: "left", arrowhead: "arrow", bend: 0 },
+    { id: "c2", from: "moon", to: "earth", label: "shadow", color: "cyan", route: "straight", fromAnchor: "right", toAnchor: "left", arrowhead: "arrow", bend: 0 },
   ],
   segments: [
     { id: "s1", title: "The Sun", narration: "The Sun radiates powerful light across space.", targetIds: ["sun"], action: "reveal", durationMs: 5000 },
