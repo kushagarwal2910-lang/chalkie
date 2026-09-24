@@ -3,7 +3,6 @@ import type { ResearchSource } from "@/lib/lesson-schema";
 import { rerankWithGroq } from "@/lib/groq";
 import type { GroqCallOptions } from "@/lib/groq-pool";
 import { resolveProviderCredentials } from "@/lib/provider-credentials";
-import { getRedis } from "@/lib/redis";
 
 type TavilyResult = { title?: string; url?: string; content?: string; raw_content?: string; score?: number };
 type ResearchChunk = { id: string; sourceId: string; title: string; url: string; text: string; lexical: number; semantic: number; score: number };
@@ -100,34 +99,11 @@ function contextFromChunks(chunks: ResearchChunk[]) {
 
 async function saveIndex(sessionId: string, index: ResearchIndex) {
   researchIndexes.set(indexKey(sessionId), index);
-  const redis = getRedis();
-  if (!redis) return;
-  try {
-    if (redis.status === "wait") await redis.connect();
-    await redis.set(indexKey(sessionId), JSON.stringify(index), "EX", 86400);
-  } catch (error) {
-    console.warn("[chalkie] Redis indexing unavailable", error);
-  }
 }
 
 async function loadIndex(sessionId: string): Promise<ResearchIndex | null> {
   const key = indexKey(sessionId);
-  const memory = researchIndexes.get(key);
-  if (memory) return memory;
-  const redis = getRedis();
-  if (!redis) return null;
-  try {
-    if (redis.status === "wait") await redis.connect();
-    const raw = await redis.get(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as ResearchIndex;
-    if (!Array.isArray(parsed.sources) || !Array.isArray(parsed.chunks)) return null;
-    researchIndexes.set(key, parsed);
-    return parsed;
-  } catch (error) {
-    console.warn("[chalkie] Redis retrieval unavailable", error);
-    return null;
-  }
+  return researchIndexes.get(key) ?? null;
 }
 
 export async function retrieveSessionContext(question: string, sessionId: string, fallbackSources: ResearchSource[] = [], groqOptions: GroqCallOptions = {}): Promise<{ sources: ResearchSource[]; context: string; indexed: boolean }> {

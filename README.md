@@ -15,6 +15,7 @@
   <img src="https://img.shields.io/badge/Groq-openai%2Fgpt--oss--120b-f55036" alt="Groq" />
   <img src="https://img.shields.io/badge/Layout-ELK.js%20%7C%20Dagre-purple" alt="Layout Engines" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178c6?logo=typescript" alt="TypeScript" />
+  <img src="https://img.shields.io/badge/WCAG-2.1%20AAA-success" alt="WCAG 2.1 AAA" />
 </p>
 
 ---
@@ -55,12 +56,12 @@ Chalkie coordinates live web research, dual LLM instances, client-side vector gr
 
 ```mermaid
 flowchart TD
-    UserReq["User request"] -->|"Query"| TavilyNode["Tavily (30-35)"]
+    UserReq["User request"] -->|"Query"| TavilyNode["Tavily (30-35 sources)"]
     
     TavilyNode -->|"HTTP GET"| WebInternet(("Web / Internet"))
     WebInternet -->|"Scraped Content"| TavilyNode
     
-    TavilyNode -->|"30-35 Documents"| RAGIndex[("RAG Index")]
+    TavilyNode -->|"30-35 Documents"| RAGIndex[("In-Memory RAG Index<br/>(BM25 + Semantic Scoring)")]
     
     RAGIndex --> PrimaryLLM["LLM (openai/gpt-oss-120b)"]
     PrimaryLLM -->|"Synthesizes Simulations & Visuals"| OverviewJSON["overview.JSON<br/>(Diagrams, Simulations, Cross-Sections)"]
@@ -69,9 +70,9 @@ flowchart TD
     RAGIndex -->|"Grounding Context"| LLMVA
     
     OverviewJSON -->|"Shape & Animation Schema"| TldrawSDK["TLDRAW SDK<br/>(Programmatic Editor API)"]
-    OverviewJSON -->|"Voice Stream"| Voiceover["Voiceover"]
+    OverviewJSON -->|"Voice Stream"| Voiceover["Voiceover Engine<br/>(Phonetic Math Expander)"]
     
-    LLMVA -->|"websocket (Realtime Commands,<br/>Laser Coords & Dynamic Visuals)"| TldrawSDK
+    LLMVA -->|"WebSocket (Realtime Commands,<br/>Laser Coords & Dynamic Visuals)"| TldrawSDK
     
     TldrawSDK -->|"Step-by-step Live Drawing & Simulations"| CanvasLive["Canvas<br/>(Live Animated Drawings & Simulations)"]
     TldrawSDK -->|"Macro Knowledge Map"| CanvasOverview["Overview Canvas<br/>(Structural Map & Deep Diagrams)"]
@@ -81,13 +82,13 @@ flowchart TD
     
     Buffer --> Output["Output<br/>(Interactive Classroom Experience)"]
     
-    Output -.->|"Persist & Sync"| Storage["Client Storage & Google Drive<br/><b>All state stored on Client (Browser/IndexedDB)</b><br/>Syncs to Google Drive by asking permission during sign-in"]
+    Output -.->|"Dual-Layer Persistence"| Storage["Browser Client Storage<br/><b>IndexedDB + localStorage Mirroring</b><br/>+ Optional Google Drive Cloud Backup"]
 ```
 
 ### How the Pipeline Works
 
 1. **Web Ingestion (`Tavily 30-35` $\leftrightarrow$ `Web / Internet`):**
-   Tavily scrapes 30–35 relevant web documents and markdown extracts for the question, populating a centralized session **RAG Index** (with BM25 lexical scoring and optional vector embeddings).
+   Tavily scrapes 30–35 relevant web documents and markdown extracts for the question, populating a centralized session **In-Memory RAG Index** (with BM25 lexical scoring and optional vector embeddings).
 2. **Dual LLM Engines (`openai/gpt-oss-120b` via Groq Cloud):**
    - **Primary Lesson Generator (`LLM`):** Synthesizes physical mechanisms, cutaways, and simulations into `overview.JSON`.
    - **Voice Assistant (`LLM for V.A`):** Ingests live microphone audio (`User voice`), grounds answers in the `RAG Index`, and sends low-latency WebSocket frames (`Realtime Commands, Laser Coords & Dynamic Visuals`).
@@ -97,8 +98,8 @@ flowchart TD
    - **Overview Canvas (Structural Map & Deep Diagrams):** Macro knowledge map providing high-level structural cutaways and cross-sections.
 4. **Audio-Visual Synchronization Buffer:**
    The `Voiceover` engine and `Canvas` animations both feed into a synchronization **Buffer**. The next drawing step advances only when the narration finishes, ensuring 100% audio-visual alignment.
-5. **Output & Client Storage / Google Drive:**
-   Delivers the live interactive classroom. State is stored locally in browser **IndexedDB**, with optional **Google Drive** backup (`drive.file` scope).
+5. **Output & Dual-Layer Client Storage / Google Drive:**
+   Delivers the live interactive classroom. State is stored locally in browser **IndexedDB + `localStorage`**, with individual notebook deletion and optional **Google Drive** cloud backup (`drive.file` scope).
 
 ---
 
@@ -106,12 +107,15 @@ flowchart TD
 
 - **No Generic Boxes & Flowcharts:** Chalkie is strictly instructed never to emit boring `[Step 1] -> [Step 2]` flowcharts. It draws physical cutaways (e.g., flash memory floating gates with trapped electron particles, train bogies, Bohr atomic shells with quarks, and hydraulic chambers).
 - **Mathematical Zero-Collision Layout:** Powered by **ELK.js (Eclipse Layout Kernel)** and **Dagre**, ensuring compound container hierarchy, clean margins, and spline edge routing without overlapping text.
+- **WCAG 2.1 AAA Contrast Compliance:** Dynamic text inverting algorithm (`getContrastingTextColor`) automatically chooses high-contrast dark chalk ink (`#090d16`) on bright fills and pure white (`#f8fafc`) on dark fills, guaranteeing contrast ratios from **`7.35:1` to `19.43:1`**.
 - **Parametric Scientific Primitives:** Built-in primitives for subatomic particles (`quarks`, `cluster`, `orbit`), waves, coils, particle fields, and coordinate `axes` with mandatory axis titles and ticks.
 - **Native Recharts Charts:** Statistical and quantitative data renders as live interactive charts (`custom-chart`) inside tldraw, complete with hover tooltips and dark/light mode awareness.
-- **Phonetic Speech Formatter:** Automatically expands technical units (`25 kV` $\rightarrow$ `25 kilovolts`, `3.2 GHz` $\rightarrow$ `3.2 gigahertz`), abbreviations, and math symbols (`∂L/∂W` $\rightarrow$ `gradient of loss with respect to W`) for clear, human-like narration.
-- **Neural Voice Ranking:** Automatically detects and prioritizes studio-quality Neural/Natural voices (Jenny, Guy, Aria, Google US English) over legacy robotic synthesizers.
+- **Phonetic Speech Formatter:** Automatically expands technical units (`25 kV` $\rightarrow$ `25 kilovolts`, `3.2 GHz` $\rightarrow$ `3.2 gigahertz`), abbreviations, Unicode subscripts (`x₁` $\rightarrow$ `x 1`), and math symbols (`∂L/∂W` $\rightarrow$ `gradient of loss with respect to W`, `ŷ` $\rightarrow$ `y-hat`, `ΔW` $\rightarrow$ `delta W`) for clear, human-like narration.
+- **Dual-Layer Persistence & Direct Routing:** Synchronous mirroring across `IndexedDB` and `localStorage` with direct URL routing (`/studio?id=...`). Cached lessons are automatically repaired and restored without ever getting dropped.
+- **Workspace Notebook Management:** Every notebook card in **Recent visual lessons** features an instant delete button (`Trash2`), clear cache reset, and 1-click JSON backup download.
+- **Google Drive Cloud Sync:** Optional 1-click cloud sync with official restricted `drive.file` scope.
 - **Enterprise BYOK (Bring Your Own Key):** Supports up to 3 Groq keys and 1 Tavily key, encrypted via **AES-256-GCM in HttpOnly cookies**. The sticky pool automatically fails over on rate limits (429) or auth errors without dropping the request.
-- **Offline / Free Demo Mode:** Works immediately without any credentials by loading a deterministic, interactive neural network learning lesson.
+- **Offline / Free Demo Mode:** Works immediately without any credentials by loading a deterministic, interactive neural network whiteboard lesson.
 
 ---
 
@@ -151,14 +155,14 @@ chalkie/
 │   │   ├── drive/              # Google Drive backup and restore
 │   │   └── ws/                 # WebSocket gateway (laser, pointer, presence)
 │   ├── studio/                 # Three-panel whiteboard classroom page
-│   ├── globals.css             # Tailwind v4 chalkboard theme styling
-│   └── page.tsx                # NotebookLM-style workspace homepage
+│   ├── globals.css             # Tailwind chalkboard theme styling
+│   └── page.tsx                # Notebook workspace homepage
 ├── components/
 │   ├── canvas-templates/       # Pre-built pedagogical whiteboard templates
 │   ├── chalk-canvas.tsx        # tldraw canvas host with camera & laser controls
 │   ├── chalk-visual-shape.tsx  # Custom tldraw shape for parametric SVG visuals
 │   ├── custom-shapes.tsx       # Recharts, SVG, and template shape utilities
-│   ├── chalkie-home.tsx        # Home workspace: topic input, recent lessons
+│   ├── chalkie-home.tsx        # Home workspace: topic input, recent lessons, delete
 │   ├── chalkie-studio.tsx      # Main classroom orchestrator (panels, audio, chat)
 │   ├── provider-control.tsx    # BYOK modal & quota telemetry indicators
 │   └── voice-settings-dialog.tsx # Speech rate, pitch, and voice selector
@@ -169,10 +173,10 @@ chalkie/
 │   ├── lesson-schema.ts        # Zod schema definitions for lessons & parts
 │   ├── groq.ts                 # Groq prompt templates, model calling, and rerank
 │   ├── groq-pool.ts            # Sticky 3-key failover pool with quota tracking
-│   ├── research.ts             # Tavily search, chunking, and hybrid RAG
-│   ├── speech-formatter.ts     # Phonetic converter, unit & abbreviation expander
+│   ├── research.ts             # Tavily search, chunking, and in-memory hybrid RAG
+│   ├── speech-formatter.ts     # Phonetic converter, unit & math symbol expander
 │   ├── voice-selection.ts      # Browser voice ranking & selection algorithm
-│   └── client-storage.ts       # IndexedDB & localStorage persistence
+│   └── client-storage.ts       # IndexedDB & localStorage dual persistence
 ├── server.mjs                  # Custom Node.js HTTP + WebSocket server
 └── package.json                # Dependencies and scripts
 ```
@@ -195,7 +199,6 @@ cp .env.example .env.local
 | `TAVILY_API_KEY` | Optional | — | Activates live web research of 30–35 sources. |
 | `BYOK_ENCRYPTION_SECRET` | Production | Ephemeral | 32+ character secret for AES-256-GCM cookie encryption. |
 | `NEXT_PUBLIC_TLDRAW_LICENSE_KEY` | Production | — | Required by tldraw for commercial production deployments. |
-| `REDIS_URL` | Optional | — | Redis URL for durable research index caching. |
 | `GOOGLE_CLIENT_ID` | Optional | — | Google Cloud OAuth Client ID for Drive backup. |
 | `GOOGLE_CLIENT_SECRET` | Optional | — | Google Cloud OAuth Client Secret. |
 | `SESSION_SECRET` | Optional | — | 32+ character secret for Google Drive session cookies. |
@@ -210,7 +213,7 @@ cp .env.example .env.local
 ### Prerequisites
 
 - **Node.js:** `>= 22.13.0`
-- **Package Manager:** `npm`, `pnpm`, or `yarn`
+- **Package Manager:** `npm` or `pnpm`
 
 ### 1. Clone & Install
 
@@ -236,17 +239,17 @@ Open `http://localhost:3000`. Chalkie starts with its custom `server.mjs`, power
 # Typecheck TypeScript
 npm run typecheck
 
-# Test spatial layout & collision avoidance
-node scratch/test-spatial-layout.mjs
+# Test WCAG 2.1 AAA color contrast ratios
+node scratch/test-wcag-contrast.mjs
 
-# Verify ELK.js compound containers
-node scratch/test-elk-compound.mjs
+# Test speech pronunciation & audio-visual sync
+node scratch/test-contrast-and-sync.mjs
 
-# Test Recharts data embedding
-node scratch/test-chart-validation-fix.mjs
-
-# Test client storage and IndexedDB sync
+# Test dual-layer client storage & notebook deletion
 node scratch/test-storage-and-sync.mjs
+
+# Verify server health
+node scratch/check-health.mjs
 ```
 
 ---

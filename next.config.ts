@@ -2,7 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   devIndicators: false,
-  serverExternalPackages: ["ioredis", "ws"],
+  serverExternalPackages: ["ws"],
 };
 
 export default nextConfig;
