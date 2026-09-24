@@ -13,6 +13,7 @@ import {
   Headphones,
   HardDriveUpload,
   Layers3,
+  MessageSquare,
   Mic,
   Pause,
   Play,
@@ -116,8 +117,37 @@ async function readEventStream(response: Response, onEvent: (type: string, data:
   }
 }
 
+const STOP_WORDS = new Set([
+  "what", "when", "where", "which", "who", "whom", "whose", "why", "how",
+  "does", "that", "this", "these", "those", "about", "with", "from", "into",
+  "have", "more", "also", "then", "here", "there", "explain", "teach", "please",
+  "could", "would", "should", "work", "works", "mean", "means", "show", "tell",
+  "visual", "lesson", "canvas", "board", "draw", "chalk", "step"
+]);
+
+function isLikelyNewTopic(q: string, current: LessonPlan): boolean {
+  const trimmed = q.trim().toLowerCase();
+  if (/^(new|fresh|create|topic|start fresh|reset):\s*/i.test(trimmed)) return true;
+  if (/^(teach me|create a lesson|make a lesson|give me a lesson|new topic|start a new)\b/i.test(trimmed)) return true;
+
+  // Extract meaningful query keywords (length >= 4, not in stop words)
+  const words = trimmed
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((w) => w.length >= 4 && !STOP_WORDS.has(w));
+
+  // If there are at least 2 substantive topic words and ZERO match the current board, treat as a new lesson
+  if (words.length >= 2 && current && current.objects.length > 0) {
+    const boardText = `${current.title} ${current.question} ${current.summary} ${current.visualStrategy} ${current.objects.map((o) => o.label).join(" ")}`.toLowerCase();
+    const hasOverlap = words.some((w) => boardText.includes(w));
+    if (!hasOverlap) return true;
+  }
+  return false;
+}
+
 export function ChalkieStudio() {
   const [lesson, setLesson] = useState<LessonPlan>(emptyLesson);
+  const [promptMode, setPromptMode] = useState<"auto" | "doubt" | "new">("auto");
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
   const [visualSegment, setVisualSegment] = useState<LessonSegment | null>(null);
@@ -343,8 +373,20 @@ export function ChalkieStudio() {
   }
 
   async function askQuestion(question: string) {
-    if (hasLesson) await askFollowUp(question);
-    else await generateLesson(question);
+    const cleanQuestion = question.replace(/^(new|fresh|create|topic|start fresh|reset):\s*/i, "").trim();
+    if (promptMode === "new") {
+      await generateLesson(cleanQuestion);
+    } else if (promptMode === "doubt") {
+      if (hasLesson) await askFollowUp(cleanQuestion);
+      else await generateLesson(cleanQuestion);
+    } else {
+      // Auto mode: dynamically route between generating a fresh lesson vs asking a follow-up doubt
+      if (!hasLesson || isLikelyNewTopic(question, lesson)) {
+        await generateLesson(cleanQuestion);
+      } else {
+        await askFollowUp(cleanQuestion);
+      }
+    }
   }
 
   async function generateLesson(question: string) {
@@ -1020,6 +1062,66 @@ export function ChalkieStudio() {
             </div>
 
             <div className="shrink-0 bg-[#090a0f] p-3 sm:p-4">
+              <div className="mx-auto mb-2 flex w-full max-w-[620px] items-center justify-between px-1">
+                {hasLesson ? (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setPromptMode("auto")}
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        promptMode === "auto"
+                          ? "border border-[#818cf8]/50 bg-[#25203e] text-[#c7d2fe]"
+                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
+                      }`}
+                      title="Chalkie auto-detects if your question is a follow-up doubt or a new topic"
+                    >
+                      <Sparkles size={11} className={promptMode === "auto" ? "text-[#818cf8]" : ""} />
+                      <span>Auto</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptMode("doubt")}
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        promptMode === "doubt"
+                          ? "border border-[#818cf8]/50 bg-[#25203e] text-[#c7d2fe]"
+                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
+                      }`}
+                      title="Ask a doubt about the shapes on this whiteboard"
+                    >
+                      <MessageSquare size={11} className={promptMode === "doubt" ? "text-[#818cf8]" : ""} />
+                      <span>Ask Doubt</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setPromptMode("new")}
+                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
+                        promptMode === "new"
+                          ? "border border-[#6366f1]/60 bg-[#1e1b4b] text-[#c7d2fe]"
+                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
+                      }`}
+                      title="Create a completely fresh visual lesson board"
+                    >
+                      <Plus size={11} className={promptMode === "new" ? "text-[#818cf8]" : ""} />
+                      <span>New Lesson</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-1.5 text-xs text-[#9ca3af]">
+                    <Sparkles size={12} className="text-[#818cf8]" />
+                    <span>Visual Lesson Generator</span>
+                  </div>
+                )}
+                {hasLesson && (
+                  <span className="text-[11px] text-[#6b7280]">
+                    {promptMode === "new"
+                      ? "Creates a fresh whiteboard"
+                      : promptMode === "doubt"
+                      ? "Explains from current board"
+                      : "Auto-detects doubt vs new topic"}
+                  </span>
+                )}
+              </div>
+
               <form onSubmit={submitQuestion} className="mx-auto flex w-full max-w-[620px] items-end gap-2 rounded-[20px] border border-[#222636] bg-[#12141e] p-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)] focus-within:border-[#818cf8] focus-within:ring-3 focus-within:ring-[#818cf8]/15">
                 <button
                   type="button"
@@ -1038,14 +1140,38 @@ export function ChalkieStudio() {
                     }
                   }}
                   rows={1}
-                  placeholder={hasLesson ? "Ask a follow-up about this canvas…" : "Ask Chalkie to explain anything visually…"}
+                  placeholder={
+                    promptMode === "new"
+                      ? "Ask Chalkie to explain any new topic visually…"
+                      : promptMode === "doubt"
+                      ? "Ask a doubt about this canvas…"
+                      : hasLesson
+                      ? "Ask a doubt, or explain any new topic…"
+                      : "Ask Chalkie to explain anything visually…"
+                  }
                   className="max-h-24 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-base leading-5 text-[#f3f4f6] outline-none placeholder:text-[#6b7280]"
                 />
                 <button type="submit" aria-label="Send question" title="Send question" className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#6366f1] text-white transition hover:scale-[1.04] hover:bg-[#4f46e5] disabled:opacity-35" disabled={!prompt.trim() || isBusy || degradation?.active}>
                   {isBusy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Send size={16} />}
                 </button>
               </form>
-              <p className="mt-2 text-center text-xs text-[#6b7280]">{isRecording ? "Listening — pause when you finish" : voiceState === "transcribing" ? "Turning your voice into a question…" : voiceState === "thinking" ? generationStage : voiceState === "speaking" ? "Chalkie is teaching — tap the microphone to interrupt" : hasLesson ? "Ask a doubt—Chalkie will reuse the indexed lesson sources" : "Type or speak naturally · important facts should still be verified"}</p>
+              <p className="mt-2 text-center text-xs text-[#6b7280]">
+                {isRecording
+                  ? "Listening — pause when you finish"
+                  : voiceState === "transcribing"
+                  ? "Turning your voice into a question…"
+                  : voiceState === "thinking"
+                  ? generationStage
+                  : voiceState === "speaking"
+                  ? "Chalkie is teaching — tap the microphone to interrupt"
+                  : promptMode === "new"
+                  ? "Type or speak any topic — Chalkie will research and draw a fresh lesson"
+                  : promptMode === "doubt"
+                  ? "Ask a doubt — Chalkie will point and explain using this canvas"
+                  : hasLesson
+                  ? "Ask a doubt about this board or ask any new topic to create a new lesson"
+                  : "Type or speak naturally · important facts should still be verified"}
+              </p>
             </div>
           </section>
 

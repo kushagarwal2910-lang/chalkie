@@ -204,8 +204,6 @@ const detailedVisualRoles = new Set(["subject", "component", "input", "output"])
 
 export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
   const qLower = (plan.question || "").toLowerCase();
-  const isAstronomy = /\b(moon|earth|orbit|satellite|gravity|gravitation|planet|celestial|solar system|space)\b/i.test(qLower) ||
-    plan.objects.some((o) => /\b(moon|orbit|earth|celestial)\b/i.test(o.label));
 
   // 1. Convert any legacy shapeType: "geo" or non-formula "note" to "custom"
   // and enforce minimum dimensions so labels NEVER wrap into "Moo n", "grav ity", etc.
@@ -228,22 +226,18 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
     obj.height = Math.max(minH, obj.height || 100);
   }
 
-  // 1b. Neural Networks & Perceptrons: Consolidate fragmented layers/neurons into a unified network-graph template
-  const isNeuralNetwork = /\b(neural network|perceptron|deep learning|mlp|backpropagation|hidden layer)\b/i.test(qLower) ||
-    plan.objects.some((o) => /\b(neural network|hidden layer|perceptron|layer 1|layer 2|input layer|output layer)\b/i.test(o.label));
+  // 1b. Neural Networks & Perceptrons: Clean canonical demo objects or consolidate broken empty payloads
+  const isCanonicalDemoNN = plan.objects.some((o) => o.id === "nn-input-layer");
+  const isExplicitEmptyNNQuestion =
+    /\b(how (do|does) (a )?neural networks? learn|perceptron architecture|basic neural network)\b/i.test(qLower) &&
+    plan.objects.length >= 2 &&
+    plan.objects.every((o) => !o.parts || o.parts.length === 0);
 
-  if (isNeuralNetwork) {
-    const hasFragmentedNN = plan.objects.some((o) =>
-      /\b(neuron|perceptron|layer|node|weight|activation|input|output)\b/i.test(o.label) ||
-      /\b(neuron|layer|node)\b/i.test(o.id)
-    );
-
+  if (isCanonicalDemoNN) {
     const canonicalIds = new Set(["nn-input-layer", "nn-hidden-layer", "nn-output-layer", "nn-formula-loss"]);
-
-    if (plan.objects.some((o) => o.id === "nn-input-layer")) {
-      // Ensure only the clean canonical objects remain (remove any stray boxes or fragments)
-      plan.objects = plan.objects.filter((o) => canonicalIds.has(o.id));
-    } else if (hasFragmentedNN) {
+    // Ensure only the clean canonical objects remain (remove any stray boxes or fragments)
+    plan.objects = plan.objects.filter((o) => canonicalIds.has(o.id));
+  } else if (isExplicitEmptyNNQuestion) {
       const inputLayerObj: VisualObject = {
         id: "nn-input-layer",
         role: "input",
@@ -400,17 +394,16 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
         },
       ];
     }
-  }
-
 
   // 2. Astronomy & Celestial Mechanics: Consolidate fragmented pieces into unified living systems
-  if (isAstronomy) {
-    const hasFragmentedCelestial = plan.objects.some((o) =>
-      /\b(earth|moon|orbit|orbital|gravity|gravitation|velocity)\b/i.test(o.label) ||
-      /\b(earth|moon|orbit|orbital|gravity|velocity)\b/i.test(o.id)
-    );
+  // ONLY for the specific Moon-Earth orbital question when the LLM returned fragmented empty objects
+  const isMoonEarthQuestion = /\bmoon\b/i.test(qLower) && /\bearth\b/i.test(qLower);
+  const isFragmentedEmptyCelestial = isMoonEarthQuestion &&
+    plan.objects.length >= 2 &&
+    plan.objects.every((o) => !o.parts || o.parts.length === 0) &&
+    plan.objects.some((o) => /\b(moon|earth|orbit)\b/i.test(o.label) || /\b(moon|earth|orbit)\b/i.test(o.id));
 
-    if (hasFragmentedCelestial && !plan.objects.some((o) => o.id === "moon-earth-orbital-system")) {
+  if (isFragmentedEmptyCelestial && !plan.objects.some((o) => o.id === "moon-earth-orbital-system")) {
       const masterOrbitId = "moon-earth-orbital-system";
       const vectorBalanceId = "vector-force-balance";
 
@@ -544,7 +537,6 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
         }
       }
     }
-  }
 
   // 3. Ensure every visual object has rich, meaningful vector parts (NO EMPTY RECTANGLES!)
   for (const obj of plan.objects) {
@@ -694,6 +686,52 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
         lastSegment.targetIds.push(obj.id);
       }
     }
+  }
+
+  // 4b. Reconcile segment targetIds so they always match existing object IDs
+  const existingObjectIds = new Set(plan.objects.map((o) => o.id));
+  const defaultTargetId = plan.objects[0]?.id;
+
+  for (const seg of plan.segments) {
+    if (!seg.targetIds || !Array.isArray(seg.targetIds)) {
+      seg.targetIds = defaultTargetId ? [defaultTargetId] : [];
+      continue;
+    }
+    let validTargets = seg.targetIds.filter((id) => existingObjectIds.has(id));
+
+    if (validTargets.length === 0 && seg.targetIds.length > 0) {
+      for (const target of seg.targetIds) {
+        const targetLower = target.toLowerCase();
+        const matched = plan.objects.find((o) =>
+          o.id.toLowerCase() === targetLower ||
+          o.label.toLowerCase() === targetLower ||
+          o.id.toLowerCase().includes(targetLower) ||
+          targetLower.includes(o.id.toLowerCase()) ||
+          o.label.toLowerCase().includes(targetLower) ||
+          targetLower.includes(o.label.toLowerCase())
+        );
+        if (matched && !validTargets.includes(matched.id)) {
+          validTargets.push(matched.id);
+        }
+      }
+    }
+
+    if (validTargets.length === 0) {
+      const segText = `${seg.title} ${seg.narration}`.toLowerCase();
+      const matched = plan.objects.find((o) =>
+        segText.includes(o.label.toLowerCase()) ||
+        segText.includes(o.id.toLowerCase())
+      );
+      if (matched) {
+        validTargets.push(matched.id);
+      }
+    }
+
+    if (validTargets.length === 0 && defaultTargetId) {
+      validTargets = [defaultTargetId];
+    }
+
+    seg.targetIds = validTargets;
   }
 
   // 5. Quantitative axes check: if quantitative and axes missing, auto-add axes part

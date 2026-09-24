@@ -556,6 +556,9 @@ export function ChalkCanvas({
       return;
     }
 
+    // Immediately clear stale laid-out lesson from any previous topic so it never leaks
+    setLaidOutLesson((prev) => (prev && prev.id === lesson.id ? prev : null));
+
     let active = true;
     applyElkLayout(lesson).then((res) => {
       if (active) setLaidOutLesson(res);
@@ -567,7 +570,7 @@ export function ChalkCanvas({
     return () => { active = false; };
   }, [lesson]);
 
-  const effectiveLesson = laidOutLesson || lesson;
+  const effectiveLesson = (laidOutLesson && laidOutLesson.id === lesson?.id) ? laidOutLesson : lesson;
 
   const handleMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
@@ -714,7 +717,7 @@ export function ChalkCanvas({
         currentShapeId = ids[index];
       }
 
-      const activeObj = lesson?.objects.find((obj) => createShapeId(obj.id) === currentShapeId);
+      const activeObj = effectiveLesson?.objects.find((obj) => createShapeId(obj.id) === currentShapeId);
       const label = activeObj?.label || activeSegment.action;
       const b0 = editor.getShapePageBounds(currentShapeId) || editor.getShapePageBounds(ids[0]);
       if (!b0) return;
@@ -812,7 +815,7 @@ export function ChalkCanvas({
       cancelAnimationFrame(animationFrameId);
       unsubscribe();
     };
-  }, [activeSegment, activeTargetId, isPresenting, lesson]);
+  }, [activeSegment, activeTargetId, isPresenting, effectiveLesson]);
 
   return (
     <div
