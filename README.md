@@ -245,7 +245,7 @@ cp .env.example .env.local
 | `GROQ_API_KEY` | **Recommended** | — | Primary Groq key for `openai/gpt-oss-120b`, Whisper, and Orpheus. |
 | `GROQ_API_KEY_2` | Optional | — | Secondary failover key in the sticky Groq pool. |
 | `GROQ_API_KEY_3` | Optional | — | Tertiary failover key in the sticky Groq pool. |
-| `TAVILY_API_KEY` | Optional | — | Activates live web research of 30–35 sources. |
+| `TAVILY_API_KEY` | **Recommended** | — | Activates live web research of 30–35 sources. |
 | `BYOK_ENCRYPTION_SECRET` | Production | Ephemeral | 32+ character random secret for AES-256-GCM cookie encryption. |
 | `NEXT_PUBLIC_TLDRAW_LICENSE_KEY` | Production | — | Required by tldraw for commercial production deployments. |
 | `GOOGLE_CLIENT_ID` | Optional | — | Google Cloud OAuth Client ID for Google Drive cloud sync. |
