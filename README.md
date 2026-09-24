@@ -50,12 +50,6 @@ Chalkie Whiteboard Teacher:   Prompt ──> Lightweight Semantic JSON (Seconds 
 
 ---
 
-## 🏛️ System Architecture
-
-<p align="center">
-  <img src="public/architecture.png" alt="Chalkie System Architecture" width="100%" />
-</p>
-
 ### Pipeline Flowchart
 
 ```mermaid
