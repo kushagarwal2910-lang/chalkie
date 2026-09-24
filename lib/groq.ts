@@ -73,12 +73,9 @@ CRITICAL TEACHING RULES:
 
 2. SYNCHRONIZED VOICE & LASER DRAWING:
    - In 'segments', each segment MUST introduce or focus on 1 or 2 specific objects via 'targetIds'.
-   - As the voiceover speaks each segment, Chalkie's laser pointer DRAWS and BUILDS that specific object on the whiteboard in real time!
-   - Segment 1 introduces Object 1.
-   - Segment 2 introduces Object 2 and draws the connecting Arrow 1->2.
-   - Segment 3 introduces Object 3 and connects Arrow 2->3.
-   - Segment 4 introduces Object 4, completing the entire live whiteboard diagram!
-   - This creates an exhilarating, magical live whiteboard lecture where the student watches the diagram get drawn in real time!
+   - As the voiceover speaks each segment, Chalkie's laser pointer DRAWS, REVEALS, or HIGHLIGHTS that specific object on the whiteboard in real time!
+   - Spoken narration pacing should be natural and engaging as the whiteboard visual evolves.
+   - CRITICAL: The sequence in which objects are introduced in speech does NOT dictate spatial coordinates! Spatial placement must strictly reflect physical and scientific reality (e.g. Moon is in the middle between Sun and Earth for a solar eclipse, regardless of which body is introduced first in narration).
 
 3. RICH WHITEBOARD PARTS (shapeType: "custom"):
    - Every object uses shapeType: "custom" with rich, authentic 'parts' (rect, ellipse, line, arrow, particles, wave, radial, container, etc.).
@@ -158,6 +155,18 @@ VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
      * Segment 2: Explain forward tangential velocity (v) — inertia keeps the Moon moving straight ahead. (action: "focus")
      * Segment 3: Explain Earth's inward gravitational pull (Fg) — gravity constantly pulls the Moon inward. (action: "trace")
      * Segment 4: Explain perpetual free-fall — as the Moon falls toward Earth, Earth's surface curves away at the same rate, resulting in a stable closed orbit! (action: "orbit")
+    - FOR SOLAR ECLIPSE (Sun, Moon, Earth Alignment):
+      * Physical spatial alignment MUST BE: Sun (left) -> Moon (center) -> Earth (right)!
+      * The Moon physically passes DIRECTLY BETWEEN the Sun and Earth.
+      * Sunlight travels from Sun toward Moon. The Moon blocks sunlight and casts its shadow (umbra/penumbra) onto Earth!
+      * Connection 1: sun -> moon (label: "sunlight", color: "yellow", arrowhead: "arrow").
+      * Connection 2: moon -> earth (label: "shadow", color: "cyan", arrowhead: "arrow").
+      * STRICT ERROR TO AVOID: NEVER place Earth between Sun and Moon in a solar eclipse!
+    - FOR LUNAR ECLIPSE:
+      * Physical spatial alignment MUST BE: Sun (left) -> Earth (center) -> Moon (right)!
+      * Earth is directly between the Sun and Moon, casting Earth's shadow onto the Moon.
+      * Connection 1: sun -> earth (label: "sunlight", color: "yellow", arrowhead: "arrow").
+      * Connection 2: earth -> moon (label: "shadow", color: "cyan", arrowhead: "arrow").
 8. MACHINE LEARNING, ARTIFICIAL INTELLIGENCE & NEURAL NETWORKS (e.g. How Neural Networks Learn, Backpropagation, Deep Learning, Perceptron):
    - Draw an AUTHENTIC LAYERED NETWORK GRAPH WITH GOVERNING MATHEMATICAL EQUATIONS:
      * Object 1 (role: "input", label: "Input Layer (X)", width: 180, height: 360):
@@ -178,6 +187,12 @@ VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
      * Segment 4 (target: "nn-formula-loss"): Explains computing Loss L and backpropagating gradient ΔW to update all weights.
 
 SPATIAL GEOMETRY & COMPOSITION (Clean, Collision-Free Digital Chalkboard):
+- REALITY-FIRST GEOMETRY & SCIENTIFIC TRUTH:
+  * Diagrams must reflect authentic physical and spatial arrangements in nature and engineering:
+    - Solar Eclipse: Sun (left) -> Moon (middle) -> Earth (right). The Moon physically blocks light from reaching Earth.
+    - Lunar Eclipse: Sun (left) -> Earth (middle) -> Moon (right). Earth casts its shadow onto the Moon.
+    - Vertical Systems: Atmospheric layers (Troposphere at bottom -> Exosphere at top), Earth geology (Crust at top -> Core at bottom), Ocean depth zones, and Engine pistons MUST be stacked vertically along the Y axis, NEVER flattened horizontally!
+    - Orbits: Central primary attractor with orbiting bodies positioned along orbital trajectories.
 - Top-level objects MUST be separated cleanly and never overlap unless one is explicitly a container or environment enclosing its children.
 - Compound Containers: Leave at least 60px of vertical clearance at the top (internal parts start at y >= 60) so the container header title badge never collides with internal elements.
 - Connections & Arrows: NEVER put verbose or multi-word text on arrow shafts. Arrows should be clean, direct vector paths with high-contrast colored chalk styling. Detailed flow descriptions belong in connection.label (revealed as an interactive floating tooltip when the student hovers over the arrow) and in the spoken narration segments.

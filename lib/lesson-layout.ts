@@ -110,7 +110,7 @@ function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
   if (part.type === "path") data = pathData.test(part.data) ? part.data : "";
   else if (part.type === "polygon" || part.type === "polyline") data = sanitizePoints(part.data, bounds);
   else if (["radial", "coil", "wave", "particles"].includes(part.type)) data = /^\s*\d+\s*$/.test(part.data) ? part.data.trim() : "";
-  else if (part.type === "cluster" || part.type === "quarks" || part.type === "orbit") data = part.data.replace(/[<>]/g, "").trim().slice(0, 80);
+  else if (part.type === "cluster" || part.type === "quarks" || part.type === "orbit" || part.type === "ellipse") data = part.data ? part.data.replace(/[<>]/g, "").trim().slice(0, 80) : "";
   else if (part.type === "axes") data = sanitizeAxesData(part.data);
   return { ...part, x, y, width, height, data, text, strokeWidth, opacity };
 }
@@ -165,21 +165,47 @@ function overlaps(a: VisualObject, b: VisualObject, gap = GAP): boolean {
     && a.y + a.height + gap > b.y;
 }
 
-function resolveCollision(a: VisualObject, b: VisualObject, isConnected: boolean, gap = GAP) {
+function resolveCollision(
+  a: VisualObject,
+  b: VisualObject,
+  aToB: boolean,
+  bToA: boolean,
+  gap = GAP
+) {
+  const isConnected = aToB || bToA;
   if (isConnected) {
-    // If a connects to b, b is downstream: push b to the right of a
-    if (b.x >= a.x) {
-      b.x = a.x + a.width + gap;
-      // Align Y if close
-      if (Math.abs(b.y - a.y) < 60) {
-        b.y = a.y + (a.height - b.height) / 2;
+    const src = aToB ? a : b;
+    const dst = aToB ? b : a;
+    const isVertical = Math.abs(dst.y - src.y) > Math.abs(dst.x - src.x);
+
+    if (isVertical) {
+      if (dst.y >= src.y) {
+        dst.y = src.y + src.height + gap;
+        if (Math.abs(dst.x - src.x) < 60) {
+          dst.x = src.x + (src.width - dst.width) / 2;
+        }
+      } else {
+        dst.y = src.y - dst.height - gap;
+        if (Math.abs(dst.x - src.x) < 60) {
+          dst.x = src.x + (src.width - dst.width) / 2;
+        }
+      }
+      return;
+    }
+
+    // Horizontal connection: push destination downstream of source
+    if (dst.x >= src.x) {
+      dst.x = src.x + src.width + gap;
+      if (Math.abs(dst.y - src.y) < 60) {
+        dst.y = src.y + (src.height - dst.height) / 2;
       }
     } else {
-      a.x = b.x + b.width + gap;
+      src.x = dst.x + dst.width + gap;
     }
     return;
   }
 
+  // Non-connected collision: resolve along axis of least overlap
   const ox = Math.min(a.x + a.width + gap, b.x + b.width + gap) - Math.max(a.x, b.x);
   const oy = Math.min(a.y + a.height + gap, b.y + b.height + gap) - Math.max(a.y, b.y);
 
@@ -552,6 +578,146 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
       }
     }
 
+  // 2b. Astronomical / Celestial Reality Alignment: Solar & Lunar Eclipses, Planetary Alignments
+  const isEclipseTopic =
+    /\b(eclipse|syzygy|alignment\s+of\s+sun|sun.*earth.*moon|sun.*moon.*earth)\b/i.test(qLower) ||
+    plan.objects.some((o) => /\beclipse\b/i.test(o.label) || /\beclipse\b/i.test(o.id)) ||
+    plan.segments.some((s) => /\beclipse\b/i.test(s.title || "") || /\beclipse\b/i.test(s.narration || ""));
+
+  const sunObj = plan.objects.find((o) => /\bsun\b/i.test(o.id) || /\bsun\b/i.test(o.label));
+  const moonObj = plan.objects.find((o) => /\bmoon\b/i.test(o.id) || /\bmoon\b/i.test(o.label));
+  const earthObj = plan.objects.find((o) => /\bearth\b/i.test(o.id) || /\bearth\b/i.test(o.label));
+
+  if (isEclipseTopic && sunObj && moonObj && earthObj) {
+    // Detect whether Solar Eclipse or Lunar Eclipse
+    const allText = `${qLower} ${plan.title || ""} ${plan.summary || ""} ${plan.segments.map((s) => `${s.title} ${s.narration}`).join(" ")}`.toLowerCase();
+
+    // Explicit keywords
+    const isExplicitLunar = /\b(lunar\s+eclipse|eclipse\s+of\s+the\s+moon)\b/i.test(qLower) || (/\blunar\b/i.test(allText) && !/\bsolar\b/i.test(allText));
+    const isExplicitSolar = /\b(solar\s+eclipse|eclipse\s+of\s+the\s+sun)\b/i.test(qLower) || (/\bsolar\b/i.test(allText) && !/\blunar\b/i.test(allText));
+
+    const mentionsSolar = isExplicitSolar || /\b(moon\s+(is|moves|passes|comes|positioned)\s+between\s+(the\s+)?sun\s+and\s+(the\s+)?earth|shadow\s+on\s+earth|moon.*blocks.*sun)\b/i.test(allText);
+    const mentionsLunar = isExplicitLunar || /\b(earth\s+(is|moves|passes|comes|positioned)\s+between\s+(the\s+)?sun\s+and\s+(the\s+)?moon|earth.*casts.*shadow.*moon|shadow\s+on\s+moon)\b/i.test(allText);
+
+    const isSolar = !isExplicitLunar && (mentionsSolar || !mentionsLunar);
+
+    if (isSolar) {
+      // Physical Reality for Solar Eclipse:
+      // SUN (light emitter) -> MOON (blocking body in middle) -> EARTH (observer receiving shadow)
+      const minX = Math.max(80, Math.min(sunObj.x, moonObj.x, earthObj.x));
+      const sunWidth = Math.max(160, sunObj.width);
+      const moonWidth = Math.max(120, moonObj.width);
+      const earthWidth = Math.max(160, earthObj.width);
+
+      sunObj.width = sunWidth;
+      sunObj.height = Math.max(160, sunObj.height);
+      moonObj.width = moonWidth;
+      moonObj.height = Math.max(120, moonObj.height);
+      earthObj.width = earthWidth;
+      earthObj.height = Math.max(160, earthObj.height);
+
+      sunObj.x = minX;
+      moonObj.x = sunObj.x + sunObj.width + 120;
+      earthObj.x = moonObj.x + moonObj.width + 120;
+
+      const centerY = Math.max(140, Math.min(sunObj.y, moonObj.y, earthObj.y));
+      sunObj.y = centerY;
+      moonObj.y = centerY + (sunObj.height - moonObj.height) / 2;
+      earthObj.y = centerY + (sunObj.height - earthObj.height) / 2;
+
+      // Ensure connections reflect physical solar eclipse ray/shadow paths:
+      // 1. Sun emits light to Moon
+      // 2. Moon casts shadow onto Earth
+      let hasSunToMoon = false;
+      let hasMoonToEarth = false;
+
+      for (const conn of plan.connections) {
+        if (conn.from === sunObj.id && conn.to === earthObj.id) {
+          conn.to = moonObj.id;
+          conn.label = "sunlight";
+          conn.color = "yellow";
+          hasSunToMoon = true;
+        } else if (conn.from === earthObj.id && conn.to === moonObj.id) {
+          // Earth cannot cast shadow on Moon during solar eclipse!
+          conn.from = moonObj.id;
+          conn.to = earthObj.id;
+          conn.label = "shadow";
+          conn.color = "cyan";
+          hasMoonToEarth = true;
+        } else if (conn.from === sunObj.id && conn.to === moonObj.id) {
+          conn.label = "sunlight";
+          conn.color = "yellow";
+          hasSunToMoon = true;
+        } else if (conn.from === moonObj.id && conn.to === earthObj.id) {
+          conn.label = "shadow";
+          conn.color = "cyan";
+          hasMoonToEarth = true;
+        }
+      }
+
+      if (!hasSunToMoon) {
+        plan.connections.push({
+          id: `conn-sun-to-moon-${Date.now()}`,
+          from: sunObj.id,
+          to: moonObj.id,
+          label: "sunlight",
+          color: "yellow",
+          route: "straight",
+          fromAnchor: "right",
+          toAnchor: "left",
+          arrowhead: "arrow",
+          bend: 0,
+        });
+      }
+      if (!hasMoonToEarth) {
+        plan.connections.push({
+          id: `conn-moon-to-earth-${Date.now()}`,
+          from: moonObj.id,
+          to: earthObj.id,
+          label: "shadow",
+          color: "cyan",
+          route: "straight",
+          fromAnchor: "right",
+          toAnchor: "left",
+          arrowhead: "arrow",
+          bend: 0,
+        });
+      }
+    } else {
+      // Physical Reality for Lunar Eclipse:
+      // SUN (light emitter) -> EARTH (blocking body in middle) -> MOON (in shadow)
+      const minX = Math.max(80, Math.min(sunObj.x, moonObj.x, earthObj.x));
+      const sunWidth = Math.max(160, sunObj.width);
+      const earthWidth = Math.max(160, earthObj.width);
+      const moonWidth = Math.max(120, moonObj.width);
+
+      sunObj.width = sunWidth;
+      sunObj.height = Math.max(160, sunObj.height);
+      earthObj.width = earthWidth;
+      earthObj.height = Math.max(160, earthObj.height);
+      moonObj.width = moonWidth;
+      moonObj.height = Math.max(120, moonObj.height);
+
+      sunObj.x = minX;
+      earthObj.x = sunObj.x + sunObj.width + 120;
+      moonObj.x = earthObj.x + earthObj.width + 120;
+
+      const centerY = Math.max(140, Math.min(sunObj.y, moonObj.y, earthObj.y));
+      sunObj.y = centerY;
+      earthObj.y = centerY + (sunObj.height - earthObj.height) / 2;
+      moonObj.y = centerY + (sunObj.height - moonObj.height) / 2;
+
+      for (const conn of plan.connections) {
+        if (conn.from === moonObj.id && conn.to === earthObj.id) {
+          conn.from = earthObj.id;
+          conn.to = moonObj.id;
+          conn.label = "shadow";
+          conn.color = "cyan";
+        }
+      }
+    }
+  }
+
   // 3. Ensure every visual object has rich, meaningful vector parts (NO EMPTY RECTANGLES!)
   for (const obj of plan.objects) {
     if (
@@ -564,6 +730,24 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
     }
 
     const labelLower = (obj.label || "").toLowerCase();
+
+    // Ensure celestial body ellipses have authentic data tags for SVG gradients
+    if (obj.parts && obj.parts.length > 0) {
+      if (/\b(sun|solar)\b/i.test(labelLower)) {
+        for (const p of obj.parts) {
+          if (p.type === "ellipse" && (!p.data || p.data === "circle")) p.data = "sun";
+        }
+      } else if (/\b(earth|planet)\b/i.test(labelLower)) {
+        for (const p of obj.parts) {
+          if (p.type === "ellipse" && (!p.data || p.data === "circle")) p.data = "earth";
+        }
+      } else if (/\b(moon|luna)\b/i.test(labelLower)) {
+        for (const p of obj.parts) {
+          if (p.type === "ellipse" && (!p.data || p.data === "circle")) p.data = "moon";
+        }
+      }
+    }
+
     const hasMeaningfulParts = obj.parts && obj.parts.length > 0 && !obj.parts.every((p) => p.type === "rect" && !p.text && !p.data && (p.fill === "slate" || p.fill === "none"));
 
     if (!hasMeaningfulParts) {
@@ -860,12 +1044,10 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   const nonBackdrops = sanitizedObjects.filter((o) => !BACKDROP_ROLES.has(o.role) && o.shapeType !== "frame");
   const backdrops = sanitizedObjects.filter((o) => BACKDROP_ROLES.has(o.role) || o.shapeType === "frame");
 
-  // Sort non-backdrops by their pedagogical introduction order
+  // Sort non-backdrops by their spatial coordinates (preserving physical layout)
   nonBackdrops.sort((a, b) => {
-    const orderA = pedagogicalOrder.get(a.id) ?? 999;
-    const orderB = pedagogicalOrder.get(b.id) ?? 999;
-    if (orderA !== orderB) return orderA - orderB;
-    return a.x - b.x;
+    if (Math.abs(a.x - b.x) > 10) return a.x - b.x;
+    return a.y - b.y;
   });
 
   // 4. Determine parent-child relationships between containers and their children
@@ -916,12 +1098,10 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     const container = backdrops.find((o) => o.id === containerId);
     if (!container || children.length === 0) continue;
 
-    // Sort children by pedagogical order, then by original x
+    // Sort children by spatial coordinates (left-to-right, then top-to-bottom)
     children.sort((a, b) => {
-      const orderA = pedagogicalOrder.get(a.id) ?? 999;
-      const orderB = pedagogicalOrder.get(b.id) ?? 999;
-      if (orderA !== orderB) return orderA - orderB;
-      return a.x - b.x;
+      if (Math.abs(a.x - b.x) > 10) return a.x - b.x;
+      return a.y - b.y;
     });
 
     // Determine if children fit in a single row or need wrapping
@@ -986,10 +1166,27 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
       const a = freeObjects[i];
       const b = freeObjects[j];
       if (directConnections.has(`${a.id}->${b.id}`)) {
-        // b is directly downstream of a — enforce left-to-right
-        if (b.x < a.x + a.width + 48) {
-          b.x = a.x + a.width + 60;
-          b.y = a.y + (a.height - b.height) / 2;
+        const isVertical = Math.abs(b.y - a.y) > Math.abs(b.x - a.x) * 1.2;
+        if (isVertical) {
+          if (b.y >= a.y) {
+            // Downward flow (top to bottom)
+            if (b.y < a.y + a.height + 36) {
+              b.y = a.y + a.height + 48;
+            }
+          } else {
+            // Upward flow (bottom to top)
+            if (b.y > a.y - b.height - 36) {
+              b.y = a.y - b.height - 48;
+            }
+          }
+        } else {
+          // b is directly downstream of a — enforce left-to-right
+          if (b.x < a.x + a.width + 48) {
+            b.x = a.x + a.width + 60;
+            if (Math.abs(b.y - a.y) < 60) {
+              b.y = a.y + (a.height - b.height) / 2;
+            }
+          }
         }
       }
     }
@@ -1008,8 +1205,9 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
         if (sameContainer) continue;
         if (overlaps(a, b, 48)) {
           shifted = true;
-          const isConnected = directConnections.has(`${a.id}->${b.id}`) || directConnections.has(`${b.id}->${a.id}`);
-          resolveCollision(a, b, isConnected, 56);
+          const aToB = directConnections.has(`${a.id}->${b.id}`);
+          const bToA = directConnections.has(`${b.id}->${a.id}`);
+          resolveCollision(a, b, aToB, bToA, 56);
         }
       }
     }

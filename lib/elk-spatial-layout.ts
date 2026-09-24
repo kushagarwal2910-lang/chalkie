@@ -40,9 +40,16 @@ export async function applyElkLayout(
 ): Promise<LessonPlan> {
   if (!plan.objects || plan.objects.length === 0) return plan;
 
-  const direction = options.direction || (
-    ["hierarchy", "tree", "classification"].includes(plan.diagramType) ? "DOWN" : "RIGHT"
-  );
+  const qLower = (plan.question || "").toLowerCase();
+  const summaryLower = (plan.summary || "").toLowerCase();
+  const visualStratLower = (plan.visualStrategy || "").toLowerCase();
+  const combinedText = `${qLower} ${summaryLower} ${visualStratLower}`;
+
+  const isVerticalDomain =
+    ["hierarchy", "tree", "classification", "layers", "stack"].includes(plan.diagramType) ||
+    /\b(atmosphere|atmospheric|layer|strata|geological|crust|mantle|core|ocean\s+depth|troposphere|stratosphere|mesosphere|thermosphere|exosphere|elevation|altitude|depth|vertical|pyramid|trophic|water\s+column|cylinder|piston)\b/i.test(combinedText);
+
+  const direction = options.direction || (isVerticalDomain ? "DOWN" : "RIGHT");
   const nodeSpacing = options.nodeSpacing ?? 48;
   const layerSpacing = options.layerSpacing ?? 84;
   const graphPadding = options.padding ?? 40;
@@ -243,8 +250,22 @@ export async function applyElkLayout(
         const a = nonNested[i];
         const b = nonNested[j];
         if (doBoxesOverlap(a, b, 24)) {
-          // Push b to the right of a with safety margin
-          b.x = a.x + a.width + 36;
+          const ox = Math.min(a.x + a.width + 24, b.x + b.width + 24) - Math.max(a.x, b.x);
+          const oy = Math.min(a.y + a.height + 24, b.y + b.height + 24) - Math.max(a.y, b.y);
+
+          if (direction === "DOWN" || oy < ox) {
+            if (b.y >= a.y) {
+              b.y = a.y + a.height + 36;
+            } else {
+              a.y = b.y + b.height + 36;
+            }
+          } else {
+            if (b.x >= a.x) {
+              b.x = a.x + a.width + 36;
+            } else {
+              a.x = b.x + b.width + 36;
+            }
+          }
         }
       }
     }
