@@ -1,0 +1,17 @@
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.webp
+*.mp4
+*.webm
+pnpm-lock.yaml
+package-lock.json
+*.tsbuildinfo
+node_modules/
+.next/
+dist/
+coverage/
+.chalkie-dev-secret
+Recording*
