@@ -208,6 +208,18 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
   // 1. Convert any legacy shapeType: "geo" or non-formula "note" to "custom"
   // and enforce minimum dimensions so labels NEVER wrap into "Moo n", "grav ity", etc.
   for (const obj of plan.objects) {
+    // Sanitize label: remove angle brackets, colons, hyphens at start
+    obj.label = (obj.label || "").replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim();
+
+    // Single celestial bodies (Sun, Earth, Moon, planets) are functional subjects, NEVER backdrop containers!
+    const isSingleCelestialBody =
+      /^(the\s+)?(sun|moon|earth|mars|jupiter|saturn|mercury|venus|uranus|neptune|planet|star)$/i.test(obj.label.trim()) ||
+      (/^((sun|moon|earth|planet|star)\s*(body|sphere|globe)?)$/i.test(obj.label.trim()));
+
+    if (BACKDROP_ROLES.has(obj.role) && isSingleCelestialBody) {
+      obj.role = "subject";
+    }
+
     if (obj.shapeType === "custom-template" || obj.shapeType === "custom-chart" || obj.shapeType === "custom-svg") {
       // Preserve custom semantic shapes with adequate bounds
       obj.width = Math.max(320, obj.width || 640);
@@ -397,7 +409,9 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
 
   // 2. Astronomy & Celestial Mechanics: Consolidate fragmented pieces into unified living systems
   // ONLY for the specific Moon-Earth orbital question when the LLM returned fragmented empty objects
-  const isMoonEarthQuestion = /\bmoon\b/i.test(qLower) && /\bearth\b/i.test(qLower);
+  const isMoonEarthQuestion =
+    /\b(why\s+(does\s+)?(the\s+)?moon\s+(doesn't|does\s+not|not)\s+fall|moon.*fall.*earth|moon\s+orbit.*(earth|gravity)|tangential\s+velocity.*moon)\b/i.test(qLower) &&
+    !/\b(sun|solar|eclipse|alignment|tides?|phase)\b/i.test(qLower);
   const isFragmentedEmptyCelestial = isMoonEarthQuestion &&
     plan.objects.length >= 2 &&
     plan.objects.every((o) => !o.parts || o.parts.length === 0) &&
@@ -554,7 +568,23 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
 
     if (!hasMeaningfulParts) {
       // Intelligently synthesize authentic vector graphics based on label & context
-      if (/\b(earth|planet|world)\b/i.test(labelLower)) {
+      if (/\b(sun|star|solar)\b/i.test(labelLower)) {
+        obj.width = Math.max(160, obj.width);
+        obj.height = Math.max(140, obj.height);
+        obj.parts = [{
+          type: "ellipse",
+          data: "sun",
+          text: "Sun",
+          x: 15,
+          y: 15,
+          width: obj.width - 30,
+          height: obj.height - 30,
+          fill: "orange",
+          stroke: "yellow",
+          strokeWidth: 2,
+          opacity: 1,
+        }];
+      } else if (/\b(earth|planet|world)\b/i.test(labelLower)) {
         obj.width = Math.max(160, obj.width);
         obj.height = Math.max(140, obj.height);
         obj.parts = [{
@@ -591,7 +621,7 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
         obj.height = Math.max(380, obj.height);
         obj.parts = [{
           type: "orbit",
-          data: "celestial-moon-earth",
+          data: "orbit",
           x: 20,
           y: 20,
           width: obj.width - 40,
@@ -795,7 +825,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     return {
       ...object,
       id: objectId,
-      label: object.label.replace(/[<>]/g, "").slice(0, 48),
+      label: object.label.replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim().slice(0, 48),
       labelPlacement: hasAxes ? "none" as const : object.labelPlacement,
       width,
       height,
@@ -859,6 +889,14 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
         children.push(child);
         childToParent.set(child.id, container.id);
       }
+    }
+    // If this container wraps only 1 child and has essentially the same label as the child,
+    // it's a redundant duplicate enclosure!
+    const contLabel = container.label.trim().toLowerCase().replace(/\s+(system|container|box|enclosure|frame)\b/g, "");
+    const childLabel = children[0]?.label.trim().toLowerCase();
+    if (children.length === 1 && (contLabel === childLabel || container.label.trim().toLowerCase() === childLabel)) {
+      childToParent.delete(children[0].id);
+      continue;
     }
     if (children.length > 0) {
       parentToChildren.set(container.id, children);
@@ -994,9 +1032,12 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     container.height = clamp(maxChildY - container.y + CONTAINER_PAD_Y, 320, CANVAS_HEIGHT - container.y - EDGE);
   }
 
-  // 10. Handle free backdrops (no children) — just ensure they don't overlap other objects
+  // 10. Handle free backdrops (no children from initial layout)
   for (const backdrop of backdrops) {
     if (parentToChildren.has(backdrop.id)) continue;
+    const hasMeaningfulParts = backdrop.parts && backdrop.parts.length > 0 && backdrop.parts.some((p) => p.text || p.data || (p.fill && p.fill !== "none" && p.fill !== "slate"));
+    const minRequiredNeighbors = hasMeaningfulParts ? 1 : 2;
+
     // Place behind all non-backdrops that are near it
     const nearChildren = nonBackdrops.filter((child) => {
       const cx = child.x + child.width / 2;
@@ -1004,7 +1045,8 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
       return cx >= backdrop.x - 80 && cx <= backdrop.x + backdrop.width + 80
           && cy >= backdrop.y - 80 && cy <= backdrop.y + backdrop.height + 80;
     });
-    if (nearChildren.length > 0) {
+    if (nearChildren.length >= minRequiredNeighbors) {
+      parentToChildren.set(backdrop.id, nearChildren);
       const minChildX = Math.min(...nearChildren.map((c) => c.x));
       const maxChildX = Math.max(...nearChildren.map((c) => c.x + c.width));
       const minChildY = Math.min(...nearChildren.map((c) => c.y));
@@ -1017,7 +1059,14 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   }
 
   // 11. Center the whole composition on the canvas
-  const allObjects = [...backdrops, ...nonBackdrops];
+  // Filter out empty backdrops that have no children and no meaningful visual parts
+  const activeBackdrops = backdrops.filter((b) => {
+    const hasChildren = (parentToChildren.get(b.id)?.length ?? 0) > 0;
+    if (hasChildren) return true;
+    const hasParts = b.parts && b.parts.length > 0 && b.parts.some((p) => p.text || p.data || (p.fill && p.fill !== "none" && p.fill !== "slate"));
+    return Boolean(hasParts);
+  });
+  const allObjects = [...activeBackdrops, ...nonBackdrops];
   if (allObjects.length > 0) {
     const minX = Math.min(...allObjects.map((o) => o.x));
     const maxX = Math.max(...allObjects.map((o) => o.x + o.width));
@@ -1043,6 +1092,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   }
 
   const unique = allObjects;
+  const validUniqueIds = new Set(unique.map((o) => o.id));
 
   const connectionIds = new Set<string>();
   const connections = plan.connections.flatMap((connection, index) => {
@@ -1085,7 +1135,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
 
   const fallbackId = unique[0]?.id;
   const segments = plan.segments.map((segment, index) => {
-    const targetIds = [...new Set(segment.targetIds.map((id) => idMap.get(id)).filter((id): id is string => Boolean(id)))];
+    const targetIds = [...new Set(segment.targetIds.map((id) => idMap.get(id)).filter((id): id is string => typeof id === "string" && validUniqueIds.has(id)))];
     return {
       ...segment,
       id: safeId(segment.id, `segment-${index + 1}`),

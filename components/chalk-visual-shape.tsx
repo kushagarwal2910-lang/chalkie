@@ -532,19 +532,19 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             const finalRy = isCircle ? Math.min(rx, ry) : ry;
 
             // Celestial Body Detection (Earth, Moon, Sun)
-            const textLower = (part.text || "").toLowerCase();
-            const dataLower = (part.data || "").toLowerCase();
-            const labelLower = (shape.props.label || "").toLowerCase();
+            const textLower = (part.text || "").toLowerCase().trim();
+            const dataLower = (part.data || "").toLowerCase().trim();
+            const labelLower = (shape.props.label || "").toLowerCase().trim();
             let celestialFill = common.fill;
             let celestialStroke = common.stroke;
 
-            if (dataLower.includes("earth") || textLower.includes("earth") || labelLower.includes("earth")) {
+            if (dataLower === "earth" || textLower === "earth" || (labelLower === "earth" && !textLower && !dataLower)) {
               celestialFill = `url(#${markerId}-earth)`;
               celestialStroke = "#38bdf8";
-            } else if (dataLower.includes("moon") || textLower.includes("moon") || labelLower.includes("moon")) {
+            } else if (dataLower === "moon" || textLower === "moon" || (labelLower === "moon" && !textLower && !dataLower)) {
               celestialFill = `url(#${markerId}-moon)`;
               celestialStroke = "#f1f5f9";
-            } else if (dataLower.includes("sun") || textLower.includes("sun") || labelLower.includes("sun")) {
+            } else if (dataLower === "sun" || textLower === "sun" || (labelLower === "sun" && !textLower && !dataLower)) {
               celestialFill = `url(#${markerId}-sun)`;
               celestialStroke = "#fef08a";
             }
@@ -720,21 +720,10 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             const cx = part.x > 0 ? part.x + part.width / 2 : shape.props.w / 2;
             const cy = part.y > 0 ? part.y + part.height / 2 : shape.props.h / 2;
             const radius = Math.max(42, Math.min(effectiveW, effectiveH) / 2 - 14);
-            const dataStr = (part.data || "").toLowerCase();
-            const labelStr = (shape.props.label || "").toLowerCase();
-            const isCelestial =
-              dataStr.includes("celestial") ||
-              dataStr.includes("moon") ||
-              dataStr.includes("earth") ||
-              dataStr.includes("planet") ||
-              dataStr.includes("space") ||
-              dataStr.includes("gravity") ||
-              labelStr.includes("moon") ||
-              labelStr.includes("earth") ||
-              labelStr.includes("orbit") ||
-              labelStr.includes("planet");
+            const dataStr = (part.data || "").toLowerCase().trim();
 
-            if (isCelestial && !dataStr.match(/^\d+$/)) {
+            // ONLY render the complex Moon-Earth perpetual free-fall simulation when explicitly targeted with "celestial-moon-earth"
+            if (dataStr === "celestial-moon-earth") {
               const earthR = Math.max(18, radius * 0.28);
               const moonR = Math.max(10, radius * 0.12);
               return (
@@ -848,24 +837,37 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
               );
             }
 
-            // Atomic Bohr Orbit fallback (electrons rotating on shells)
-            const count = countFromData(part.data, 2, 1, 32);
+            // Atomic Bohr Orbit (when data specifies electron count like "data: 2" or "data: 8")
+            // Or clean circular orbit path (for astronomy, satellites, planets)
+            const isElectronShell = /^\d+$/.test(dataStr);
+            const count = isElectronShell ? countFromData(dataStr, 2, 1, 32) : 0;
             return (
               <g key={key}>
-                <circle cx={cx} cy={cy} r={radius} fill="none" stroke={common.stroke || palette.slate} strokeWidth={1.5} strokeDasharray="6 4" opacity={0.7} />
-                <g className="animated-spin" style={{ transformOrigin: `${cx}px ${cy}px` }}>
-                  {Array.from({ length: count }, (_, i) => {
-                    const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
-                    const ex = cx + radius * Math.cos(angle);
-                    const ey = cy + radius * Math.sin(angle);
-                    return (
-                      <g key={i} transform={`translate(${ex}, ${ey})`}>
-                        <circle r={5} fill="#06b6d4" stroke="#0284c7" strokeWidth={1.5} filter={`url(#${markerId}-glow)`} />
-                        <text y={0.5} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize="8" fontWeight="900">-</text>
-                      </g>
-                    );
-                  })}
-                </g>
+                <circle
+                  cx={cx}
+                  cy={cy}
+                  r={radius}
+                  fill="none"
+                  stroke={common.stroke || palette.slate}
+                  strokeWidth={1.5}
+                  strokeDasharray="6 4"
+                  opacity={0.75}
+                />
+                {count > 0 && (
+                  <g className="animated-spin" style={{ transformOrigin: `${cx}px ${cy}px` }}>
+                    {Array.from({ length: count }, (_, i) => {
+                      const angle = (i / count) * Math.PI * 2 - Math.PI / 2;
+                      const ex = cx + radius * Math.cos(angle);
+                      const ey = cy + radius * Math.sin(angle);
+                      return (
+                        <g key={i} transform={`translate(${ex}, ${ey})`}>
+                          <circle r={4.5} fill="#06b6d4" stroke="#0284c7" strokeWidth={1.5} filter={`url(#${markerId}-glow)`} />
+                          <text y={0.5} textAnchor="middle" dominantBaseline="middle" fill="#ffffff" fontSize="8" fontWeight="900">-</text>
+                        </g>
+                      );
+                    })}
+                  </g>
+                )}
               </g>
             );
           }
@@ -986,19 +988,46 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
 
       {/* Production-Grade Label Badge */}
       {shape.props.labelPlacement !== "none" && shape.props.label && (() => {
+        const cleanBase = (str: string) => str.trim().toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
+        const targetClean = cleanBase(shape.props.label);
+        // If an inner visual part already displays this label, suppress the redundant pill badge!
+        const hasIdenticalPartText = parts.some((p) => {
+          if (!p.text) return false;
+          const partClean = cleanBase(p.text);
+          return Boolean(partClean && (partClean === targetClean || (targetClean.length >= 3 && (partClean.includes(targetClean) || targetClean.includes(partClean)))));
+        });
+        if (hasIdenticalPartText) return null;
+
         const isContainer = ["container", "environment", "layer", "field"].includes(shape.props.role);
-        const fontSize = isContainer ? 13 : 11;
+        const fontSize = isContainer ? 12 : 11;
+        // Clean display label: remove leading colons, hyphens, or punctuation artifacts
+        const displayLabel = shape.props.label.replace(/^[:\s\-—]+/, "").trim();
+        if (!displayLabel) return null;
+
         const charWidth = fontSize * 0.58;
-        const pillPadX = 14;
-        const pillPadY = 5;
-        const pillW = Math.min(shape.props.w - 8, shape.props.label.length * charWidth + pillPadX * 2);
+        const pillPadX = 12;
+        const pillPadY = 4;
+        const maxPillW = Math.max(60, shape.props.w - 16);
+        const desiredW = displayLabel.length * charWidth + pillPadX * 2;
+        const pillW = Math.min(maxPillW, desiredW);
         const pillH = lines.length > 1 ? fontSize * 2 + pillPadY * 2 + 2 : fontSize + pillPadY * 2;
-        const pillX = Math.max(4, labelX - pillW / 2);
-        const pillY = labelY - pillH / 2;
+        const pillX = Math.max(8, Math.min(shape.props.w - pillW - 8, labelX - pillW / 2));
+        const pillY = isContainer
+          ? 10
+          : isAbove
+          ? 6
+          : isBelow
+          ? shape.props.h - pillH - 6
+          : (shape.props.h - pillH) / 2;
         const bgFill = "#181b29";
         const bgOpacity = 0.94;
         const textFill = "#f8fafc";
         const strokeColor = "#333c54";
+
+        const textToDisplay = desiredW > maxPillW
+          ? displayLabel.slice(0, Math.max(3, Math.floor((maxPillW - pillPadX * 2) / charWidth) - 1)) + "…"
+          : displayLabel;
+
         return (
           <g>
             <rect
@@ -1014,8 +1043,8 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
               filter={`url(#${markerId}-shadow)`}
             />
             <text
-              x={labelX}
-              y={labelY}
+              x={pillX + pillW / 2}
+              y={pillY + pillH / 2}
               textAnchor="middle"
               dominantBaseline="middle"
               fill={textFill}
@@ -1024,11 +1053,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
               fontWeight="700"
               letterSpacing="-0.01em"
             >
-              {lines.map((line, index) => (
-                <tspan key={line} x={labelX} dy={index === 0 ? (lines.length > 1 ? -(fontSize * 0.45) : 0) : fontSize + 2}>
-                  {line}
-                </tspan>
-              ))}
+              {textToDisplay}
             </text>
           </g>
         );
