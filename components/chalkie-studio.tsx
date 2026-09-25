@@ -22,7 +22,6 @@ import {
   Send,
   Share2,
   Sparkles,
-  Volume2,
   Waves,
   X,
   AlertTriangle,
@@ -34,6 +33,8 @@ import {
   PanelRightClose,
   PanelRightOpen,
   SlidersHorizontal,
+  MoreHorizontal,
+  ArrowUpRight,
 } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { followUpPlanSchema, lessonPlanSchema, type LessonPlan, type LessonSegment } from "@/lib/lesson-schema";
@@ -46,6 +47,8 @@ import { newestProviderQuota, parseProviderFailure, providerFailureError, provid
 import { readProviderEventStream } from "@/lib/provider-event-stream";
 import { ChalkieIcon } from "@/components/chalkie-icon";
 import { VoiceSettingsDialog } from "@/components/voice-settings-dialog";
+import { StudioWorkspace } from "@/components/studio-workspace";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { formatNarrationForSpeech } from "@/lib/speech-formatter";
 import { computeTargetPositions } from "@/lib/target-matcher";
 import { getProgressiveVisibleObjects } from "@/lib/progressive-scene";
@@ -143,6 +146,12 @@ export function ChalkieStudio() {
   const [lastHeard, setLastHeard] = useState("");
   const [lastAnswer, setLastAnswer] = useState("");
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const overviewRef = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = overviewRef.current;
+    if (overviewOpen && !dialog?.open) dialog?.showModal();
+    else if (!overviewOpen && dialog?.open) dialog.close();
+  }, [overviewOpen]);
   const [voiceSettingsOpen, setVoiceSettingsOpen] = useState(false);
   const [leftPanelOpen, setLeftPanelOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
@@ -195,6 +204,7 @@ export function ChalkieStudio() {
   const displaySources = lesson.sources.filter((source) => `${source.title} ${source.publisher}`.toLowerCase().includes(sourceQuery.toLowerCase()));
   const hasLesson = lesson.segments.length > 0;
   const isBusy = isGenerating || isFollowUpGenerating || voiceState === "transcribing";
+  const canSubmitPrompt = prompt.trim().length >= (hasLesson && promptMode !== "new" ? 2 : 3) && !isBusy;
   const retryView = providerRetryView(retryState.failure, providerQuota, retryNow);
   const showProviderBanner = retryState.status === "failed" || providerQuota?.allUnavailable;
   const totalDuration = Math.round(lesson.segments.reduce((total, segment) => total + segment.durationMs, 0) / 1000);
@@ -402,7 +412,7 @@ export function ChalkieStudio() {
   function submitQuestion(event: FormEvent) {
     event.preventDefault();
     const question = prompt.trim();
-    if (!question || isBusy) return;
+    if (!canSubmitPrompt) return;
     setPrompt("");
     void askQuestion(question);
   }
@@ -855,535 +865,166 @@ export function ChalkieStudio() {
   }, []);
 
   return (
-    <main className="h-dvh min-h-[680px] bg-[#090a0f] text-[#f3f4f6]">
-      <div className="flex h-full flex-col overflow-hidden bg-[#090a0f]">
-        {showProviderBanner && (
-          <div role="alert" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#5c3018] bg-gradient-to-r from-[#24130a] to-[#1a0e07] px-4 py-2.5 sm:px-5">
-            <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#452210] text-[#fb923c]">
-              <AlertTriangle size={15} />
-            </span>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-[#fdba74]">{retryView.title}</p>
-              <p className="mt-0.5 text-xs text-[#fdba74]/80">{retryView.detail}</p>
-              {retryState.status === "failed" && retryState.operation && "question" in retryState.operation && <p className="mt-1 max-w-xl truncate text-xs text-[#fed7aa]">Pending {retryState.operation.kind === "followup" ? "follow-up" : "lesson"}: {retryState.operation.question}</p>}
-            </div>
-            {retryState.status === "failed" && <button type="button" onClick={() => void retryFailedRequest()} disabled={isBusy || !retryView.canRetry} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[#fb923c] px-3 text-xs font-semibold text-[#24130a] transition hover:bg-[#fdba74] disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={13} /> Retry request</button>}
-            <button type="button" onClick={() => { const btn = document.querySelector<HTMLButtonElement>("[title='Provider keys and live rate limits']"); btn?.click(); }} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#5c3018] bg-[#24130a] px-3 text-xs font-semibold text-[#fdba74] shadow-sm transition hover:bg-[#331b0e]">
-              <KeyRound size={13} /> Manage keys
-            </button>
-          </div>
-        )}
-        <header className="flex h-14 shrink-0 items-center justify-between border-b border-[#1f2333] bg-[#0e1017] px-3.5 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <Link
-              href="/"
-              className="flex shrink-0 items-center gap-2.5 rounded-lg py-1 pr-1 transition hover:opacity-90 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#818cf8]"
-              aria-label="Back to Chalkie home"
-            >
-              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#141624] p-1 ring-1 ring-[#262c3e] shadow-[0_4px_14px_rgba(0,0,0,0.5)]">
-                <ChalkieIcon size={24} alt="Chalkie logo" />
-              </span>
-              <span className="text-sm font-semibold tracking-[-0.02em] text-[#f3f4f6]">Chalkie</span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={toggleLeftPanel}
-              className={`grid h-8 w-8 shrink-0 place-items-center rounded-lg transition ${
-                leftPanelOpen
-                  ? "bg-[#181b28] text-[#c7d2fe] hover:bg-[#202436]"
-                  : "text-[#9ca3af] hover:bg-[#161824] hover:text-[#f3f4f6]"
-              }`}
-              title={leftPanelOpen ? "Collapse Sources sidebar" : "Expand Sources sidebar"}
-              aria-label={leftPanelOpen ? "Collapse Sources sidebar" : "Expand Sources sidebar"}
-            >
-              {leftPanelOpen ? <PanelLeftClose size={17} /> : <PanelLeftOpen size={17} />}
-            </button>
-
-            <span className="h-4 w-px bg-[#1f2333]" />
-
-            <span className="max-w-[200px] truncate text-xs font-medium text-[#9ca3af] sm:max-w-[320px]">
-              {hasLesson ? lesson.title : "New visual lesson"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5 sm:gap-2">
-            <div
-              className="hidden items-center gap-1.5 rounded-full px-2 py-1 text-xs text-[#9ca3af] lg:flex"
-              title={connectionStatus === "realtime" ? "Realtime connected" : "Connecting to realtime updates; lessons remain available"}
-            >
-              <span className={`h-1.5 w-1.5 rounded-full ${connectionStatus === "realtime" ? "live-pulse bg-[#34d399]" : "bg-[#e49b3f]"}`} />
-              <span className={`text-[11px] font-medium ${connectionStatus === "realtime" ? "text-[#34d399]/90" : "text-[#e49b3f]"}`}>{connectionStatus === "realtime" ? "Live" : connectionStatus === "connecting" ? "Connecting" : "Reconnecting"}</span>
-            </div>
-
-            <ProviderControl className="hidden sm:inline-flex" />
-
-            <Link
-              href="/"
-              className="flex h-8 items-center gap-1.5 rounded-lg bg-[#6366f1] px-3 text-xs font-semibold text-white shadow-[0_2px_10px_#6366f12b] transition hover:bg-[#4f46e5]"
-            >
-              <Plus size={14} strokeWidth={2.4} />
-              <span>New</span>
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => void syncToDrive()}
-              className="flex h-8 items-center gap-1.5 rounded-lg border border-[#222636] bg-[#141620] px-3 text-xs font-medium text-[#d1d5db] transition hover:border-[#38bdf8]/40 hover:bg-[#15202e] hover:text-[#38bdf8]"
-              title="Back up lesson to Google Drive (or download JSON)"
-            >
-              <Cloud size={13} className="text-[#38bdf8]" />
-              <span className="hidden sm:inline">Google Sync</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => void shareLesson()}
-              className="hidden h-8 items-center gap-1.5 rounded-lg border border-[#222636] bg-[#141620] px-3 text-xs font-medium text-[#d1d5db] transition hover:border-[#32384e] hover:bg-[#1a1d2b] sm:flex"
-              title="Share lesson link"
-            >
-              <Share2 size={13} />
-              <span>Share</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={async () => {
+    <main className="studio-shell">
+      <header className="studio-header">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="Back to Chalkie home">
+            <ChalkieIcon size={32} alt="" />
+            <span className="text-lg font-semibold tracking-[-.04em]">Chalkie<span className="text-[#c4b5fd]">.</span></span>
+          </Link>
+          <span className="hidden h-5 w-px bg-[#363a40] sm:block" />
+          <p className="hidden min-w-0 truncate text-sm text-[#a9adb6] sm:block" title={lesson.title}>{hasLesson ? lesson.title : "Untitled lesson"}</p>
+        </div>
+        <div className="flex shrink-0 items-center gap-1.5 sm:gap-2">
+          <span className="studio-desktop-only items-center gap-2 px-2 text-xs text-[#a9c9b0]" title={connectionStatus === "realtime" ? "Realtime connected" : "Connecting to realtime updates; lessons remain available"}>
+            <span className={`h-1.5 w-1.5 rounded-full ${connectionStatus === "realtime" ? "bg-[#a9c9b0]" : "bg-[#e9bd92]"}`} />
+            {connectionStatus === "realtime" ? "Connected" : connectionStatus === "connecting" ? "Connecting" : "Reconnecting"}
+          </span>
+          <ProviderControl />
+          <Link href="/" className="studio-primary h-10 gap-1.5 px-3" aria-label="Start a new lesson"><Plus size={16} /><span className="hidden sm:inline">New lesson</span></Link>
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><button className="studio-icon-button" aria-label="Lesson actions"><MoreHorizontal size={20} /></button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="z-[2000] w-60 rounded-xl border-[#363a40] bg-[#282c31] p-1.5 text-[#f3f3ee]">
+              <DropdownMenuItem onSelect={() => void syncToDrive()} className="min-h-11 gap-3 rounded-lg focus:bg-[#363a40]"><Cloud size={16} /> Back up lesson</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => void shareLesson()} className="min-h-11 gap-3 rounded-lg focus:bg-[#363a40]"><Share2 size={16} /> Copy lesson link</DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => notify("Ask a question to begin. Use Sources to explore research and Guide to replay any step. Drag the whiteboard to explore, or choose a drawing tool to edit.")} className="min-h-11 gap-3 rounded-lg focus:bg-[#363a40]"><CircleHelp size={16} /> How to use Chalkie</DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-[#363a40]" />
+              <DropdownMenuItem onSelect={async () => {
                 if (!confirm("Clear this lesson, reset server research cache, and start fresh?")) return;
                 clearPendingProviderRequest();
                 stopPlayback(true);
                 await clearAllClientStorage();
-                try { await fetch("/api/reset", { method: "POST" }); } catch { /* ignore */ }
+                try { await fetch("/api/reset", { method: "POST" }); } catch { /* Keep local reset available offline. */ }
                 setLesson(emptyLesson);
                 setRevealedStep(null);
                 notify("Workspace cleared");
-              }}
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#9ca3af] transition hover:bg-[#281116] hover:text-[#f87171]"
-              title="Clear lesson and start fresh"
-              aria-label="Clear lesson"
-            >
-              <Trash2 size={15} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => notify("Type a question or tap the microphone. Chalkie researches, draws, and teaches automatically.")}
-              className="hidden h-8 w-8 shrink-0 place-items-center rounded-lg text-[#9ca3af] transition hover:bg-[#161824] hover:text-[#f3f4f6] sm:grid"
-              title="How to use Chalkie"
-              aria-label="How to use Chalkie"
-            >
-              <CircleHelp size={16} />
-            </button>
-
-            <span className="hidden h-4 w-px bg-[#1f2333] lg:inline" />
-
-            <button
-              type="button"
-              onClick={toggleRightPanel}
-              className={`hidden h-8 w-8 shrink-0 place-items-center rounded-lg transition lg:grid ${
-                rightPanelOpen
-                  ? "bg-[#181b28] text-[#c7d2fe] hover:bg-[#202436]"
-                  : "text-[#9ca3af] hover:bg-[#161824] hover:text-[#f3f4f6]"
-              }`}
-              title={rightPanelOpen ? "Collapse Lesson Guide sidebar" : "Expand Lesson Guide sidebar"}
-              aria-label={rightPanelOpen ? "Collapse Lesson Guide sidebar" : "Expand Lesson Guide sidebar"}
-            >
-              {rightPanelOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-            </button>
-          </div>
-        </header>
-
-        <nav className="grid h-11 shrink-0 grid-cols-3 border-b border-[#1f2333] bg-[#0e1017] lg:hidden" aria-label="Workspace panels">
-          {(["sources", "canvas", "studio"] as const).map((panel) => (
-            <button
-              key={panel}
-              onClick={() => setActiveMobilePanel(panel)}
-              className={`text-xs font-semibold capitalize transition ${activeMobilePanel === panel ? "border-b-2 border-[#818cf8] text-[#c7d2fe]" : "text-[#6b7280]"}`}
-            >
-              {panel}
-            </button>
-          ))}
-        </nav>
-
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <aside
-            className={`${
-              activeMobilePanel === "sources" ? "flex w-full" : "hidden"
-            } min-h-0 shrink-0 flex-col border-r border-[#1f2333] bg-[#0e1017] transition-all duration-300 ease-in-out lg:flex ${
-              leftPanelOpen
-                ? "lg:w-[288px] opacity-100"
-                : "lg:w-0 overflow-hidden border-r-0 p-0 opacity-0 pointer-events-none"
-            }`}
-          >
-            <div className="flex h-full w-full min-h-0 flex-col lg:w-[288px]">
-            <div className="flex h-14 shrink-0 items-center justify-between px-4">
-              <div className="flex items-center gap-2">
-                <Layers3 size={16} className="text-[#9c8cff]" />
-                <h2 className="text-sm font-semibold text-[#f3f4f6]">Sources</h2>
-                <span className="rounded-full bg-[#201d36] px-2 py-0.5 text-xs font-medium text-[#a5b4fc]">{lesson.sources.length} / 20</span>
-              </div>
-            </div>
-
-            <div className="px-3 pb-3">
-              <label className="flex h-10 items-center gap-2 rounded-xl border border-[#222636] bg-[#141620] px-3 text-[#9ca3af] shadow-sm focus-within:border-[#818cf8] focus-within:ring-2 focus-within:ring-[#818cf8]/15">
-                <Search size={14} />
-                <input value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} className="min-w-0 flex-1 bg-transparent text-sm text-[#f3f4f6] outline-none placeholder:text-[#6b7280]" placeholder="Search sources" aria-label="Search lesson sources" />
-              </label>
-            </div>
-
-            <div className="scrollbar-none flex-1 overflow-y-auto px-3 pb-3">
-              <button disabled={!lesson.question || isBusy} onClick={() => void generateLesson(lesson.question)} className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#282e42] bg-[#141624] py-3 text-sm font-medium text-[#a5b4fc] transition hover:border-[#818cf8]/50 hover:bg-[#1c2035] disabled:cursor-not-allowed disabled:opacity-40">
-                <Sparkles size={14} className="text-[#9c8cff]" /> Refresh research
-              </button>
-
-              <p className="mb-2 px-1 text-xs font-semibold uppercase tracking-[.12em] text-[#6b7280]">Ranked for this lesson</p>
-              <div className="space-y-1.5">
-                {!displaySources.length && (
-                  <div className="rounded-2xl border border-dashed border-[#262b3c] bg-[#131520] px-4 py-7 text-center">
-                    <Search className="mx-auto mb-2 text-[#6f737c]" size={18} />
-                    <p className="text-sm font-medium text-[#d1d5db]">{lesson.sources.length ? "No matching sources" : "Sources appear after you ask"}</p>
-                    <p className="mt-1 text-xs leading-5 text-[#6b7280]">{lesson.sources.length ? "Try another title or publisher." : "Research is ranked around your exact question."}</p>
-                  </div>
-                )}
-                {displaySources.map((source, index) => (
-                  <button key={source.id} onClick={() => window.open(source.url, "_blank", "noopener,noreferrer")} className="group flex w-full items-start gap-3 rounded-xl border border-transparent p-2.5 text-left transition hover:border-[#262c3e] hover:bg-[#151722] hover:shadow-sm">
-                    <span className={`mt-0.5 grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#1c1f2e] ${sourceColors[index % sourceColors.length]}`}>
-                      {source.url.includes("youtube") ? <Play size={13} /> : <FileText size={13} />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-[#e5e7eb]">{source.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[#9ca3af]">{source.publisher}</span>
-                    </span>
-                    <span className="mt-1 grid h-4 w-4 place-items-center rounded border border-[#818cf8]/50 bg-[#818cf8]/15 text-[#a5b4fc]"><Check size={10} /></span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            <div className="border-t border-[#1f2333] bg-[#0c0d14]/80 p-3">
-              <div className="rounded-xl border border-[#1f2333] bg-[#131520] p-3 shadow-sm">
-                <div className="mb-2 flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 text-[#9ca3af]"><Cloud size={12} /> Research index</span>
-                  <span className={isBusy ? "max-w-[140px] truncate text-[#fb923c]" : "max-w-[140px] truncate text-[#34d399]"}>{lesson.sources.length ? `${lesson.sources.length} sources indexed` : generationStage}</span>
-                </div>
-                <div className="h-1.5 overflow-hidden rounded-full bg-[#1c202e]"><div className={`h-full rounded-full bg-gradient-to-r from-[#6d55d8] to-[#34d399] transition-all duration-500 ${isBusy ? "w-2/3 animate-pulse" : lesson.sources.length ? "w-full" : "w-0"}`} /></div>
-                <p className="mt-2 text-xs leading-4 text-[#6b7280]">Semantic + lexical + question-aware ranking</p>
-              </div>
-              <button onClick={syncToDrive} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-[#222636] bg-[#141620] py-2.5 text-xs font-medium text-[#9ca3af] transition hover:bg-[#1a1d2b] hover:text-[#f3f4f6]">
-                <HardDriveUpload size={13} /> Back up to Google Drive
-              </button>
-            </div>
-            </div>
-          </aside>
-
-          <section className={`${activeMobilePanel === "canvas" ? "flex w-full" : "hidden"} relative min-h-0 min-w-0 flex-1 flex-col bg-[#090a0f] transition-all duration-300 ease-in-out lg:flex`}>
-            <div className="relative m-2 mb-0 min-h-0 flex-1 overflow-hidden rounded-2xl border border-[#1f2333] bg-[#0c0d12] shadow-[0_8px_32px_rgba(0,0,0,0.6)]">
-              <ChalkCanvas
-                lesson={lesson}
-                activeSegment={isPlaying ? visualSegment : null}
-                activeStep={activeStep}
-                revealedStep={revealedStep}
-                isPresenting={isPlaying}
-                isSpeaking={voiceState === "speaking"}
-                activeTargetId={activeTargetId}
-                playbackRequest={playbackRequest}
-                onPlaybackState={handleCanvasPlaybackState}
-              />
-
-              {!hasLesson && !isGenerating && (
-                <div className="pointer-events-none absolute inset-0 z-[500] grid place-items-center bg-[radial-gradient(circle_at_center,#141724fa_0%,#0e1017ef_60%,#090a0fcc_100%)] px-6 text-[#f3f4f6]">
-                  <div className="pointer-events-auto w-full max-w-[560px] text-center">
-                    <div className="mx-auto mb-5 grid h-16 w-16 place-items-center rounded-2xl bg-[#141624] p-2 ring-1 ring-[#282d40] shadow-[0_12px_32px_rgba(0,0,0,0.6)]">
-                      <ChalkieIcon size={46} alt="Chalkie" />
-                    </div>
-                    <h1 className="text-balance text-3xl font-semibold tracking-[-.045em] text-[#f3f4f6]">Learn it by seeing it</h1>
-                    <p className="mx-auto mt-3 max-w-md text-base leading-6 text-[#9ca3af]">Ask about a mechanism, system, process, place, or idea. Chalkie researches it and builds the right visual model.</p>
-                    <button
-                      type="button"
-                      onClick={toggleRecording}
-                      className="mx-auto mt-6 flex h-13 items-center gap-3 rounded-full bg-[#6366f1] px-6 text-sm font-semibold text-white shadow-[0_12px_28px_#6650cf44] transition hover:-translate-y-0.5 hover:bg-[#4f46e5]"
-                    >
-                      <span className="grid h-8 w-8 place-items-center rounded-full bg-white/15"><Mic size={17} /></span>
-                      Talk to Chalkie
-                    </button>
-                    <div className="mt-5 flex flex-wrap justify-center gap-2 text-sm">
-                      {["Show me how a camera focuses light", "Why do tides change?", "Teach me supply and demand"].map((example) => (
-                        <button key={example} onClick={() => void generateLesson(example)} className="rounded-full border border-[#262c3e] bg-[#141624] px-3.5 py-2 text-[#d1d5db] shadow-sm transition hover:border-[#818cf8]/50 hover:bg-[#1e2238] hover:text-[#c7d2fe]">{example}</button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {isGenerating && (
-                <div className="pointer-events-none absolute inset-0 z-[500] grid place-items-center bg-[#0c0d12]/92 text-[#e5e7eb] backdrop-blur-[4px]">
-                  <div className="w-[min(420px,82vw)] rounded-[24px] border border-[#282d40] bg-[#141622]/95 p-6 text-center text-[#f3f4f6] shadow-[0_22px_60px_rgba(0,0,0,0.85)]">
-                    <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-[#818cf8]/15 text-[#818cf8]"><Waves className="animate-pulse" size={23} /></div>
-                    <p className="mt-4 text-lg font-semibold tracking-[-.025em] text-[#f3f4f6]">Building your visual explanation</p>
-                    <p className="mt-2 text-sm text-[#9ca3af]">{generationStage}</p>
-                    {lastHeard && <p className="mt-4 line-clamp-2 rounded-xl bg-[#1a1d2b] px-3 py-2 text-xs italic text-[#cbd5e1]">“{lastHeard}”</p>}
-                  </div>
-                </div>
-              )}
-
-              {isFollowUpGenerating && (
-                <div className="pointer-events-none absolute bottom-4 left-1/2 z-30 flex w-[min(520px,86%)] -translate-x-1/2 items-center gap-3 rounded-2xl border border-[#3d336b] bg-[#161426]/95 px-4 py-3 text-[#e5e7eb] shadow-[0_16px_38px_rgba(0,0,0,0.7)] backdrop-blur-md">
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#25203e] text-[#a5b4fc]"><Waves className="animate-pulse" size={17} /></span>
-                  <span className="min-w-0"><span className="block text-xs font-semibold uppercase tracking-[.11em] text-[#a5b4fc]">Live follow-up</span><span className="mt-0.5 block truncate text-sm text-[#f3f4f6]">{generationStage}</span></span>
-                </div>
-              )}
-            </div>
-
-            <div className="shrink-0 bg-[#090a0f] p-3 sm:p-4">
-              <div className="mx-auto mb-2 flex w-full max-w-[620px] items-center justify-between px-1">
-                {hasLesson ? (
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setPromptMode("auto")}
-                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                        promptMode === "auto"
-                          ? "border border-[#818cf8]/50 bg-[#25203e] text-[#c7d2fe]"
-                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
-                      }`}
-                      title="Chalkie auto-detects if your question is a follow-up doubt or a new topic"
-                    >
-                      <Sparkles size={11} className={promptMode === "auto" ? "text-[#818cf8]" : ""} />
-                      <span>Auto</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPromptMode("doubt")}
-                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                        promptMode === "doubt"
-                          ? "border border-[#818cf8]/50 bg-[#25203e] text-[#c7d2fe]"
-                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
-                      }`}
-                      title="Ask a doubt about the shapes on this whiteboard"
-                    >
-                      <MessageSquare size={11} className={promptMode === "doubt" ? "text-[#818cf8]" : ""} />
-                      <span>Ask Doubt</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setPromptMode("new")}
-                      className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-medium transition ${
-                        promptMode === "new"
-                          ? "border border-[#6366f1]/60 bg-[#1e1b4b] text-[#c7d2fe]"
-                          : "border border-transparent text-[#9ca3af] hover:text-[#e5e7eb]"
-                      }`}
-                      title="Create a completely fresh visual lesson board"
-                    >
-                      <Plus size={11} className={promptMode === "new" ? "text-[#818cf8]" : ""} />
-                      <span>New Lesson</span>
-                    </button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1.5 text-xs text-[#9ca3af]">
-                    <Sparkles size={12} className="text-[#818cf8]" />
-                    <span>Visual Lesson Generator</span>
-                  </div>
-                )}
-                {hasLesson && (
-                  <span className="text-[11px] text-[#6b7280]">
-                    {promptMode === "new"
-                      ? "Creates a fresh whiteboard"
-                      : promptMode === "doubt"
-                      ? "Explains from current board"
-                      : "Auto-detects doubt vs new topic"}
-                  </span>
-                )}
-              </div>
-
-              <form onSubmit={submitQuestion} className="mx-auto flex w-full max-w-[620px] items-end gap-2 rounded-[20px] border border-[#222636] bg-[#12141e] p-2 shadow-[0_10px_30px_rgba(0,0,0,0.6)] focus-within:border-[#818cf8] focus-within:ring-3 focus-within:ring-[#818cf8]/15">
-                <button
-                  type="button"
-                  onClick={toggleRecording}
-                  aria-label={isRecording ? "Stop recording" : "Ask with your voice"}
-                  title={isRecording ? "Stop recording" : "Ask with your voice"}
-                  className={`mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full border transition ${isRecording ? "voice-ring border-[#f43f5e]/45 bg-[#2a1016] text-[#f43f5e]" : "border-[#2e3448] bg-[#1c1f2e] text-[#a5b4fc] hover:bg-[#252a40]"}`}
-                ><Mic size={17} /></button>
-                <textarea
-                  value={prompt}
-                  onChange={(event) => setPrompt(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" && !event.shiftKey) {
-                      event.preventDefault();
-                      event.currentTarget.form?.requestSubmit();
-                    }
-                  }}
-                  rows={1}
-                  placeholder={
-                    promptMode === "new"
-                      ? "Ask Chalkie to explain any new topic visually…"
-                      : promptMode === "doubt"
-                      ? "Ask a doubt about this canvas…"
-                      : hasLesson
-                      ? "Ask a doubt, or explain any new topic…"
-                      : "Ask Chalkie to explain anything visually…"
-                  }
-                  className="max-h-24 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-base leading-5 text-[#f3f4f6] outline-none placeholder:text-[#6b7280]"
-                />
-                <button type="submit" aria-label="Send question" title="Send question" className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#6366f1] text-white transition hover:scale-[1.04] hover:bg-[#4f46e5] disabled:opacity-35" disabled={!prompt.trim() || isBusy}>
-                  {isBusy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Send size={16} />}
-                </button>
-              </form>
-              <p className="mt-2 text-center text-xs text-[#6b7280]">
-                {isRecording
-                  ? "Listening — pause when you finish"
-                  : voiceState === "transcribing"
-                  ? "Turning your voice into a question…"
-                  : voiceState === "thinking"
-                  ? generationStage
-                  : voiceState === "speaking"
-                  ? "Chalkie is teaching — tap the microphone to interrupt"
-                  : promptMode === "new"
-                  ? "Type or speak any topic — Chalkie will research and draw a fresh lesson"
-                  : promptMode === "doubt"
-                  ? "Ask a doubt — Chalkie will point and explain using this canvas"
-                  : hasLesson
-                  ? "Ask a doubt about this board or ask any new topic to create a new lesson"
-                  : "Type or speak naturally · important facts should still be verified"}
-              </p>
-            </div>
-          </section>
-
-          <aside
-            className={`${
-              activeMobilePanel === "studio" ? "flex w-full" : "hidden"
-            } min-h-0 shrink-0 flex-col border-l border-[#1f2333] bg-[#0e1017] transition-all duration-300 ease-in-out lg:flex ${
-              rightPanelOpen
-                ? "lg:w-[332px] opacity-100"
-                : "lg:w-0 overflow-hidden border-l-0 p-0 opacity-0 pointer-events-none"
-            }`}
-          >
-            <div className="flex h-full w-full min-h-0 flex-col lg:w-[332px]">
-              <div className="flex h-14 shrink-0 items-center px-4">
-                <div className="flex items-center gap-2"><BookOpen size={16} className="text-[#fb923c]" /><h2 className="text-sm font-semibold text-[#f3f4f6]">Lesson guide</h2></div>
-              </div>
-
-            <div className="scrollbar-none flex-1 overflow-y-auto px-3 pb-4">
-              <div className="mb-4 overflow-hidden rounded-2xl border border-[#2b2742] bg-gradient-to-br from-[#1a1829] to-[#0d0e15] text-white shadow-[0_10px_28px_rgba(0,0,0,0.6)]">
-                <div className="relative min-h-28 overflow-hidden border-b border-white/8 p-4">
-                  <div className="absolute -right-5 -top-12 h-28 w-28 rounded-full bg-[#818cf8]/20 blur-2xl" />
-                  <div className="relative flex items-center justify-between text-xs font-semibold uppercase tracking-[.12em] text-[#c7d2fe]">
-                    <div className="flex items-center gap-2">
-                      <Headphones size={13} /> Voice lesson
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setVoiceSettingsOpen(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2 py-1 text-[11px] font-normal normal-case text-neutral-300 transition hover:border-[#818cf8]/40 hover:bg-white/10 hover:text-white"
-                      title="Voice model, clarity & cadence settings"
-                    >
-                      <SlidersHorizontal size={12} className="text-[#818cf8]" />
-                      <span>Voice settings</span>
-                    </button>
-                  </div>
-                  <h3 className="relative mt-2 truncate text-base font-semibold tracking-[-.01em] text-white">{hasLesson ? lesson.title : "Your lesson will speak here"}</h3>
-                  <p className="relative mt-1 line-clamp-3 text-xs leading-5 text-[#9ca3af]">{lastAnswer || (hasLesson ? lesson.visualStrategy : "Ask with your voice or the message box")}</p>
-                </div>
-                <div className="p-3">
-                  <div className="flex items-center gap-3">
-                    <button disabled={!hasLesson || !!canvasError} onClick={togglePlayback} aria-label={isPlaying ? "Pause lesson" : "Play lesson"} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#818cf8] text-[#090a0f] shadow-[0_6px_18px_#818cf844] transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:scale-100">
-                      {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
-                    </button>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex h-5 items-end gap-[3px]">
-                        {[7, 13, 9, 17, 12, 6, 15, 19, 10, 14, 8, 17, 12, 7, 14, 10, 5, 12].map((height, index) => (
-                          <span key={index} className={`w-full rounded-full ${index < 5 ? "bg-[#818cf8]" : "bg-white/10"}`} style={{ height }} />
-                        ))}
-                      </div>
-                      <div className="mt-1.5 flex justify-between text-xs text-[#9ca3af]"><span>{isPlaying ? `Step ${activeStep + 1}` : "Ready"}</span><span>{Math.floor(totalDuration / 60)}:{String(totalDuration % 60).padStart(2, "0")}</span></div>
-                    </div>
-                    <Volume2 size={15} className="text-[#6b7280]" />
-                  </div>
-                </div>
-              </div>
-
-              <div className="mb-3 flex items-center justify-between px-1">
-                <p className="text-xs font-semibold uppercase tracking-[.13em] text-[#6b7280]">Teaching sequence</p>
-                <span className="flex items-center gap-1 text-xs text-[#6b7280]"><Clock3 size={12} /> {lesson.segments.length} steps</span>
-              </div>
-
-              <div className="space-y-1">
-                {!hasLesson && (
-                  <div className="rounded-2xl border border-dashed border-[#262b3c] bg-[#131520] p-6 text-center">
-                    <Waves className="mx-auto text-[#6b7280]" size={20} />
-                    <p className="mt-2 text-sm font-medium text-[#d1d5db]">Built for your question</p>
-                    <p className="mt-1 text-xs leading-5 text-[#6b7280]">The visual strategy and sequence are generated together.</p>
-                  </div>
-                )}
-                {lesson.segments.map((step, index) => {
-                  const state = index < activeStep ? "done" : index === activeStep ? "active" : "next";
-                  return (
-                  <button
-                    onClick={() => {
-                      const run = playbackRunRef.current + 1;
-                      playbackRunRef.current = run;
-                      setActiveStep(index);
-                      void playStep(index, run);
-                    }}
-                    key={step.id}
-                    disabled={!!canvasError}
-                    aria-label={`Teach ${step.title}`}
-                    className={`relative flex w-full gap-3 rounded-xl border p-3 text-left transition ${state === "active" ? "border-[#3d336b] bg-[#1c1a2e] shadow-sm" : "border-transparent hover:border-[#222636] hover:bg-[#141622]"}`}
-                  >
-                    <span className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-semibold ${state === "done" ? "bg-[#0c241c] text-[#34d399]" : state === "active" ? "bg-[#6366f1] text-white" : "border border-[#282d3e] bg-[#141622] text-[#9ca3af]"}`}>
-                      {state === "done" ? <Check size={12} /> : index + 1}
-                    </span>
-                    {index < lesson.segments.length - 1 && <span className="absolute left-[26px] top-10 h-7 w-px bg-[#222636]" />}
-                    <span className="min-w-0">
-                      <span className={`block text-sm font-medium ${state === "active" ? "text-[#c7d2fe]" : "text-[#d1d5db]"}`}>{step.title}</span>
-                      <span className="mt-1 block truncate text-xs text-[#6b7280]">{step.action} · {step.targetIds.length} visual targets</span>
-                    </span>
-                  </button>
-                )})}
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[#1f2333] bg-[#12141e] p-3.5 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="flex items-center gap-2 text-xs font-medium text-[#d1d5db]"><span className="grid h-6 w-6 place-items-center rounded-lg bg-[#fb923c]/15 text-[#fb923c]"><Focus size={13} /></span>Laser sync</span>
-                  <span className="rounded-full border border-[#183d2f] bg-[#0c241c] px-2 py-0.5 text-xs text-[#34d399]">Audio clock</span>
-                </div>
-                <p className="text-xs leading-5 text-[#6b7280]">The pointer and camera follow semantic objects while the current mechanism or relationship is explained.</p>
-              </div>
-            </div>
-
-            <div className="border-t border-[#1f2333] bg-[#0c0d14]/80 p-3">
-              <button disabled={!hasLesson} onClick={() => setOverviewOpen(true)} className="flex w-full items-center justify-between rounded-xl border border-[#222636] bg-[#141620] px-3 py-2.5 text-sm font-medium text-[#d1d5db] transition hover:bg-[#1a1d2b] hover:text-[#f3f4f6] disabled:cursor-not-allowed disabled:opacity-35">
-                <span className="flex items-center gap-2"><Layers3 size={14} className="text-[#9c8cff]" /> Open overview map</span>
-                <span className="text-[#6b7280]">⌘K</span>
-              </button>
-            </div>
-            </div>
-          </aside>
+              }} className="min-h-11 gap-3 rounded-lg text-[#f0aca9] focus:bg-[#493134] focus:text-[#ffd3d0]"><Trash2 size={16} /> Clear workspace</DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
+      </header>
+
+      {showProviderBanner && (
+        <div role="alert" className="studio-provider-banner">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-[#e9bd92]" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-[#f1cba7]">{retryView.title}</p>
+            <p className="mt-1 text-xs leading-5 text-[#dbc2ab]">{retryView.detail}</p>
+            {retryState.status === "failed" && retryState.operation && "question" in retryState.operation && <p className="mt-1 truncate text-xs text-[#dbc2ab]">Pending {retryState.operation.kind === "followup" ? "follow-up" : "lesson"}: {retryState.operation.question}</p>}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {retryState.status === "failed" && <button type="button" onClick={() => void retryFailedRequest()} disabled={isBusy || !retryView.canRetry} className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-[#e9bd92] px-3 text-xs font-semibold text-[#30251e] disabled:cursor-not-allowed disabled:opacity-45"><RotateCcw size={13} /> Retry request</button>}
+            <button type="button" onClick={() => document.querySelector<HTMLButtonElement>("[title='Provider keys and live rate limits']")?.click()} className="inline-flex min-h-10 items-center gap-1.5 rounded-full border border-[#75553a] px-3 text-xs font-semibold text-[#f1cba7]"><KeyRound size={13} /> Manage keys</button>
+          </div>
+        </div>
+      )}
+
+      <nav className="studio-mobile-tabs" aria-label="Workspace panels">
+        {(["sources", "canvas", "studio"] as const).map((panel) => (
+          <button key={panel} type="button" onClick={() => setActiveMobilePanel(panel)} aria-pressed={activeMobilePanel === panel} aria-controls={`workspace-${panel}`}>
+            {panel === "sources" ? <Layers3 size={16} /> : panel === "canvas" ? <Focus size={16} /> : <BookOpen size={16} />}
+            {panel === "studio" ? "Guide" : panel === "sources" ? "Sources" : "Canvas"}
+          </button>
+        ))}
+      </nav>
+
+      <div className="studio-workspace">
+        <StudioWorkspace activePanel={activeMobilePanel} sourcesOpen={leftPanelOpen} guideOpen={rightPanelOpen}
+          sources={
+            <aside className="studio-panel" aria-label="Lesson sources">
+              <div className="studio-panel-heading"><h2><Layers3 size={17} /> Sources <span className="studio-count">{lesson.sources.length}</span></h2><button type="button" onClick={toggleLeftPanel} className="studio-icon-button studio-desktop-only" aria-label="Collapse Sources sidebar"><PanelLeftClose size={17} /></button></div>
+              <div className="px-4 pb-4">
+                <label className="studio-search"><Search size={15} /><input value={sourceQuery} onChange={(event) => setSourceQuery(event.target.value)} placeholder="Find a source" aria-label="Search lesson sources" /></label>
+              </div>
+              <div className="studio-panel-scroll px-3">
+                {!displaySources.length && <div className="studio-empty-card"><FileText size={25} /><h3>{lesson.sources.length ? "No matching sources" : "A little context goes a long way"}</h3><p>{lesson.sources.length ? "Try a different title or publisher." : "Ask a question and the research behind your lesson will appear here."}</p></div>}
+                <div className="space-y-1">
+                  {displaySources.map((source, index) => <a key={source.id} href={source.url} target="_blank" rel="noopener noreferrer" className="studio-source" title={source.title}>
+                    <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#2d3037] ${sourceColors[index % sourceColors.length]}`}>{source.url.includes("youtube") ? <Play size={15} /> : <FileText size={15} />}</span>
+                    <span className="min-w-0 flex-1"><span className="line-clamp-2 break-words text-sm font-medium leading-5 text-[#e5e6e1]">{source.title}</span><span className="mt-1 block truncate text-xs text-[#a9adb6]">{source.publisher}</span></span><ArrowUpRight size={14} className="mt-1 shrink-0 text-[#838994]" />
+                  </a>)}
+                </div>
+                {hasLesson && <button disabled={!lesson.question || isBusy} onClick={() => void generateLesson(lesson.question)} className="studio-secondary my-4 w-full gap-2 text-xs"><RotateCcw size={14} /> Refresh research</button>}
+              </div>
+              <div className="studio-panel-footer">
+                <p className="mb-3 flex items-center gap-2 text-xs text-[#a9adb6]"><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${isBusy ? "animate-pulse bg-[#e9bd92]" : "bg-[#a9c9b0]"}`} /><span className="truncate">{isBusy ? generationStage : lesson.sources.length ? `${lesson.sources.length} sources for this lesson` : "Ready for your first question"}</span></p>
+                <button onClick={syncToDrive} className="studio-secondary w-full gap-2 text-xs"><HardDriveUpload size={14} /> Back up lesson</button>
+              </div>
+            </aside>
+          }
+          canvas={
+            <section className="studio-canvas-panel" aria-label="Canvas workspace">
+              <div className="studio-canvas-heading">
+                <div className="flex min-w-0 items-center gap-2">
+                  {!leftPanelOpen && <button type="button" onClick={toggleLeftPanel} className="studio-icon-button studio-desktop-only" aria-label="Expand Sources sidebar"><PanelLeftOpen size={17} /></button>}
+                  <span className="text-sm font-medium">Whiteboard</span>
+                  {hasLesson && <span className="hidden truncate text-xs text-[#a9adb6] sm:inline">{isPlaying ? `Step ${activeStep + 1} of ${lesson.segments.length}` : `${lesson.segments.length} steps`}</span>}
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  {hasLesson && <button type="button" disabled={!!canvasError} onClick={togglePlayback} className="studio-secondary min-h-9 gap-1.5 px-3 text-xs" aria-label={isPlaying ? "Pause narration" : "Play narration"}>{isPlaying ? <Pause size={13} /> : <Play size={13} />}{isPlaying ? "Pause" : "Listen"}</button>}
+                  {!rightPanelOpen && <button type="button" onClick={toggleRightPanel} className="studio-icon-button studio-desktop-only" aria-label="Expand Lesson Guide sidebar"><PanelRightOpen size={17} /></button>}
+                </div>
+              </div>
+              <div className="studio-board" aria-busy={isGenerating}>
+                <ChalkCanvas lesson={lesson} activeSegment={isPlaying ? visualSegment : null} activeStep={activeStep} revealedStep={revealedStep} isPresenting={isPlaying} isSpeaking={voiceState === "speaking"} activeTargetId={activeTargetId} playbackRequest={playbackRequest} onPlaybackState={handleCanvasPlaybackState} />
+                {!hasLesson && !isGenerating && <div className="studio-board-empty"><div className="m-auto w-full max-w-[480px] py-6 text-center">
+                  <div className="studio-sketch" aria-hidden="true"><span /><span /><span /><svg viewBox="0 0 220 100"><path d="M55 50H85M135 50H165M110 32V16H190V50" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 4" /></svg></div>
+                  <p className="mb-3 text-[11px] font-semibold uppercase tracking-[.18em] text-[#a9c9b0]">Make room for a new idea</p>
+                  <h1 className="text-balance text-2xl font-medium tracking-[-.035em] sm:text-3xl">See how it all connects.</h1>
+                  <p className="mx-auto mt-3 max-w-sm text-sm leading-6 text-[#a9adb6]">One question becomes a visual lesson.<br className="hidden sm:block" /> Listen, explore, and make it your own.</p>
+                  <button type="button" onClick={toggleRecording} className="studio-primary mx-auto mt-5 gap-2 px-5"><Mic size={16} /> Talk to Chalkie</button>
+                  <div className="mt-5 flex flex-wrap justify-center gap-2">
+                    {["Why do tides change?", "How does a camera focus?", "Explain supply and demand"].map((example) => <button key={example} onClick={() => void generateLesson(example)} className="studio-suggestion">{example}<ArrowUpRight size={12} /></button>)}
+                  </div>
+                </div></div>}
+                {isGenerating && <div className="studio-board-loading" role="status"><div className="m-auto max-w-sm p-6 text-center"><Waves className="mx-auto animate-pulse text-[#c4b5fd]" size={32} /><h2 className="mt-5 text-xl font-medium tracking-[-.03em]">Connecting the dots</h2><p className="mt-2 text-sm leading-6 text-[#a9adb6]">{generationStage}</p>{lastHeard && <p className="mt-4 line-clamp-2 text-xs italic text-[#a9adb6]">“{lastHeard}”</p>}</div></div>}
+                {isFollowUpGenerating && <div className="studio-followup" role="status"><Waves size={18} className="shrink-0 animate-pulse text-[#c4b5fd]" /><span className="min-w-0 truncate text-sm">{generationStage}</span></div>}
+              </div>
+              <div className="studio-composer">
+                {hasLesson && <div className="mb-2 flex flex-wrap gap-1" role="group" aria-label="Question mode">{(["auto", "doubt", "new"] as const).map((mode) => <button type="button" key={mode} onClick={() => setPromptMode(mode)} aria-pressed={promptMode === mode} className="studio-mode">{mode === "auto" ? <Sparkles size={12} /> : mode === "doubt" ? <MessageSquare size={12} /> : <Plus size={12} />}{mode === "auto" ? "Auto" : mode === "doubt" ? "Follow-up" : "New topic"}</button>)}</div>}
+                <form onSubmit={submitQuestion} className="studio-prompt-form">
+                  <textarea maxLength={1000} value={prompt} onChange={(event) => setPrompt(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) { event.preventDefault(); event.currentTarget.form?.requestSubmit(); } }} rows={1} aria-label="Your question" placeholder={promptMode === "new" ? "What would you like to learn next?" : promptMode === "doubt" ? "Ask about this whiteboard…" : hasLesson ? "Ask a follow-up, or explore a new idea…" : "What would you like to understand?"} />
+                  <button type="button" onClick={toggleRecording} aria-label={isRecording ? "Stop recording" : "Ask with your voice"} title={isRecording ? "Stop recording" : "Ask with your voice"} className={`studio-icon-button ${isRecording ? "voice-ring bg-[#493134] text-[#f0aca9]" : "text-[#c4b5fd]"}`}><Mic size={18} /></button>
+                  <button type="submit" aria-label="Send question" title="Send question" className="studio-send" disabled={!canSubmitPrompt}>{isBusy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#292333]/30 border-t-[#292333]" /> : <Send size={17} />}</button>
+                </form>
+                <p className="studio-composer-hint" role="status">{isRecording ? "Listening — pause when you finish" : voiceState === "transcribing" ? "Turning your voice into a question…" : voiceState === "thinking" ? generationStage : voiceState === "speaking" ? "Chalkie is teaching · ask a question to interrupt" : "Made for curiosity. Always check important facts."}</p>
+              </div>
+            </section>
+          }
+          guide={
+            <aside className="studio-panel" aria-label="Lesson guide">
+              <div className="studio-panel-heading"><h2><BookOpen size={17} /> Lesson guide</h2><button type="button" onClick={toggleRightPanel} className="studio-icon-button studio-desktop-only" aria-label="Collapse Lesson Guide sidebar"><PanelRightClose size={17} /></button></div>
+              <div className="studio-panel-scroll px-4">
+                <div className="studio-voice-card">
+                  <div className="flex flex-wrap items-center justify-between gap-2"><span className="flex items-center gap-2 text-xs font-medium text-[#d4c8f2]"><Headphones size={15} /> Listen & learn</span><button type="button" onClick={() => setVoiceSettingsOpen(true)} className="studio-icon-button h-8 min-h-8 w-8 text-[#d4c8f2]" aria-label="Voice settings" title="Voice settings"><SlidersHorizontal size={16} /></button></div>
+                  <h3 className="mt-4 break-words text-lg font-medium leading-6 tracking-[-.02em]">{hasLesson ? lesson.title : "A lesson, at your pace"}</h3>
+                  <p className="mt-2 line-clamp-3 text-xs leading-5 text-[#b8b3c3]">{lastAnswer || (hasLesson ? lesson.visualStrategy : "Follow along as your ideas take shape on the whiteboard.")}</p>
+                  <div className="mt-5 flex items-center gap-3">
+                    <button disabled={!hasLesson || !!canvasError} onClick={togglePlayback} aria-label={isPlaying ? "Pause lesson" : "Play lesson"} className="studio-send h-11 w-11">{isPlaying ? <Pause size={17} fill="currentColor" /> : <Play size={17} fill="currentColor" />}</button>
+                    <div className="min-w-0 flex-1"><div className="flex h-6 items-center gap-[3px]" aria-hidden="true">{[7, 13, 9, 17, 12, 6, 15, 22, 10, 14, 8, 17, 12, 7, 14, 10, 5, 12, 16, 8].map((height, index) => <span key={index} className={`min-w-0 flex-1 rounded-full ${isPlaying ? "animate-pulse bg-[#c4b5fd]" : "bg-[#71677f]"}`} style={{ height, animationDelay: `${index * .08}s` }} />)}</div><div className="mt-2 flex justify-between text-[11px] text-[#b8b3c3]"><span>{isPlaying ? `Step ${activeStep + 1}` : hasLesson ? "Ready when you are" : "Waiting for a question"}</span><span>{Math.floor(totalDuration / 60)}:{String(totalDuration % 60).padStart(2, "0")}</span></div></div>
+                  </div>
+                </div>
+                <div className="mb-3 mt-6 flex items-center justify-between gap-2"><h3 className="text-xs font-medium uppercase tracking-[.1em] text-[#a9adb6]">Step by step</h3><span className="flex items-center gap-1 text-xs text-[#a9adb6]"><Clock3 size={12} /> {lesson.segments.length}</span></div>
+                {!hasLesson && <div className="studio-empty-card"><Waves size={25} /><h3>Your path to understanding</h3><p>Each lesson is broken into steps you can revisit anytime.</p></div>}
+                <div className="space-y-2 pb-5">{lesson.segments.map((step, index) => {
+                  const state = index < activeStep ? "done" : index === activeStep ? "active" : "next";
+                  return <button key={step.id} disabled={!!canvasError} onClick={() => { const run = playbackRunRef.current + 1; playbackRunRef.current = run; setActiveStep(index); void playStep(index, run); }} aria-label={`Teach ${step.title}`} aria-current={state === "active" ? "step" : undefined} className="studio-step">
+                    <span className={`studio-step-number ${state === "done" ? "bg-[#303d36] text-[#a9c9b0]" : state === "active" ? "bg-[#c4b5fd] text-[#292333]" : "bg-[#30343a] text-[#a9adb6]"}`}>{state === "done" ? <Check size={13} /> : String(index + 1).padStart(2, "0")}</span>
+                    <span className="min-w-0"><span className="block break-words text-sm font-medium leading-5">{step.title}</span><span className="mt-1.5 line-clamp-2 break-words text-xs leading-5 text-[#a9adb6]">{step.narration}</span></span>
+                  </button>;
+                })}</div>
+              </div>
+              <div className="studio-panel-footer"><button disabled={!hasLesson} onClick={() => setOverviewOpen(true)} className="studio-secondary w-full justify-between px-4 text-xs"><span className="flex items-center gap-2"><Focus size={15} /> Explore full whiteboard</span><ArrowUpRight size={15} /></button></div>
+            </aside>
+          }
+        />
       </div>
 
-      {overviewOpen && (
-        <div className="fixed inset-0 z-[2147483000] grid place-items-center bg-[#000000]/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-label="Lesson overview map">
-          <div className="flex h-[min(760px,90vh)] w-[min(1180px,95vw)] flex-col overflow-hidden rounded-[24px] border border-[#222636] bg-[#0e1017] text-[#f3f4f6] shadow-2xl">
-            <div className="flex h-16 shrink-0 items-center gap-3 border-b border-[#1f2333] px-5">
-              <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#201d36] text-[#818cf8]"><Layers3 size={17} /></span>
-              <div><h2 className="text-sm font-semibold text-[#f3f4f6]">Complete visual model</h2><p className="mt-0.5 text-xs text-[#9ca3af]">Explore and edit the full scene</p></div>
-              <button onClick={() => setOverviewOpen(false)} className="ml-auto grid h-9 w-9 place-items-center rounded-full border border-[#222636] text-[#9ca3af] hover:bg-[#1a1d2b] hover:text-[#f3f4f6]" aria-label="Close overview"><X size={16} /></button>
-            </div>
-            <div className="relative m-4 flex-1 overflow-hidden rounded-2xl border border-[#1f2333] bg-[#0c0d12]">
-              <ChalkCanvas lesson={lesson} activeSegment={null} activeStep={lesson.segments.length - 1} isPresenting={false} />
-            </div>
-          </div>
-        </div>
-      )}
-
+      <dialog ref={overviewRef} onCancel={() => setOverviewOpen(false)} onClose={() => setOverviewOpen(false)} aria-labelledby="overview-title" className="studio-overview">
+        <div className="flex h-full min-h-0 flex-col"><div className="flex min-h-16 shrink-0 items-center justify-between gap-3 border-b border-[#363a40] px-4 sm:px-5"><div className="min-w-0"><h2 id="overview-title" className="text-sm font-medium">The complete picture</h2><p className="mt-1 text-xs text-[#a9adb6]">Explore and edit your full whiteboard.</p></div><button onClick={() => setOverviewOpen(false)} className="studio-icon-button" aria-label="Close overview"><X size={18} /></button></div><div className="relative m-2 min-h-0 flex-1 overflow-hidden rounded-xl sm:m-4">{overviewOpen && <ChalkCanvas lesson={lesson} activeSegment={null} activeStep={lesson.segments.length - 1} isPresenting={false} />}</div></div>
+      </dialog>
       <VoiceSettingsDialog open={voiceSettingsOpen} onOpenChange={setVoiceSettingsOpen} />
-
-      {toast && (
-        <div role="status" className="fade-up fixed bottom-5 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#161824]/95 px-4 py-2.5 text-xs text-white shadow-2xl backdrop-blur-xl">
-          <Sparkles size={14} className="text-[#9c8cff]" /> {toast}
-          <button onClick={() => setToast(null)} aria-label="Dismiss"><X size={13} className="text-[#9ca3af]" /></button>
-        </div>
-      )}
+      {toast && <div role="status" className="studio-toast"><Sparkles size={16} className="shrink-0 text-[#c4b5fd]" /><span className="min-w-0 flex-1 break-words">{toast}</span><button onClick={() => setToast(null)} className="studio-icon-button h-8 min-h-8 w-8" aria-label="Dismiss notification"><X size={15} /></button></div>}
     </main>
   );
 }

@@ -2,7 +2,7 @@
 
 import { AlertCircle, CheckCircle2, Gauge, KeyRound, RotateCcw, Save, ShieldCheck, Trash2, X } from "lucide-react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import { Dialog as DialogPrimitive } from "radix-ui";
 import { clearAllClientStorage } from "@/lib/client-storage";
 import { newestProviderQuota, providerKeysetIdentity, providerRetryView, quotaMatchesConfiguration, retryCountdown, sanitizeProviderQuota, type ProviderKeyStatus, type ProviderQuota } from "@/lib/provider-retry";
 export type { ProviderQuota } from "@/lib/provider-retry";
@@ -45,11 +45,11 @@ function statusLabel(status: ProviderKeyStatus) {
 }
 
 function statusColor(status: ProviderKeyStatus) {
-  if (status === "active" || status === "ready") return "bg-[#35a477]";
-  if (status === "cooldown") return "bg-[#e49b3f]";
-  if (status === "exhausted") return "bg-[#d95061] animate-pulse";
-  if (status === "invalid") return "bg-[#d95061]";
-  return "bg-[#9da2aa]";
+  if (status === "active" || status === "ready") return "bg-[#a9c9b0]";
+  if (status === "cooldown") return "bg-[#d6b58f]";
+  if (status === "exhausted") return "bg-[#d6a0a7]";
+  if (status === "invalid") return "bg-[#d6a0a7]";
+  return "bg-[#a9adb6]";
 }
 
 export function ProviderControl({ className = "" }: { className?: string }) {
@@ -178,89 +178,70 @@ export function ProviderControl({ className = "" }: { className?: string }) {
   }
 
   return (
-    <>
-      <button type="button" onClick={() => setOpen(true)} className={`inline-flex h-9 items-center gap-2 rounded-full border px-3 text-xs font-semibold transition ${summary?.personalKeysNeedReentry || summary?.quota.allUnavailable ? "border-[#5c232a] bg-[#291216] text-[#f87171]" : "border-[#262a38] bg-[#141620] text-[#d1d5db] hover:border-[#33394c] hover:bg-[#1a1d2b]"} ${className}`} title="Provider keys and live rate limits">
-        <span className={`h-2 w-2 rounded-full ${summary?.personalKeysNeedReentry ? "bg-[#e49b3f]" : !summary?.configured ? "bg-[#9da2aa]" : summary.quota.allUnavailable ? "bg-[#d95061]" : "bg-[#35a477]"}`} />
-        <span className="max-w-[130px] truncate">{topLabel}</span>
-        <Gauge size={14} />
-      </button>
-
-      {open && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[2147483647] grid place-items-center bg-[#000000]/80 p-4 backdrop-blur-sm" role="dialog" aria-modal="true" aria-labelledby="provider-title">
-          <div className="flex max-h-[92vh] w-[min(680px,96vw)] flex-col overflow-hidden rounded-[24px] border border-[#222636] bg-[#0e1017] text-[#f3f4f6] shadow-2xl">
-            <div className="flex shrink-0 items-center gap-3 border-b border-[#1f2333] px-5 py-4">
-              <span className="grid h-10 w-10 place-items-center rounded-[13px] bg-[#201d36] text-[#818cf8]"><KeyRound size={18} /></span>
-              <div><h2 id="provider-title" className="font-semibold tracking-[-.02em] text-[#f3f4f6]">AI provider keys</h2><p className="mt-0.5 text-xs text-[#9ca3af]">Up to three Groq keys, tried in queue order</p></div>
-              <button type="button" onClick={() => setOpen(false)} className="ml-auto grid h-9 w-9 place-items-center rounded-full border border-[#222636] text-[#9ca3af] transition hover:bg-[#1a1d2b] hover:text-[#f3f4f6]" aria-label="Close API key settings"><X size={16} /></button>
+    <DialogPrimitive.Root open={open} onOpenChange={setOpen}>
+      <DialogPrimitive.Trigger asChild>
+        <button type="button" aria-label={`AI provider keys: ${topLabel}`} className={`inline-flex h-10 min-w-10 shrink-0 items-center justify-center gap-2 rounded-xl border px-2.5 text-[11px] font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-[#c4b5fd] focus-visible:ring-offset-2 focus-visible:ring-offset-[#17191c] sm:px-3 sm:text-xs ${summary?.personalKeysNeedReentry || summary?.quota.allUnavailable ? "border-[#645344] bg-[#302920] text-[#e1c3a2]" : "border-[#363a40] bg-[#202327] text-[#d2d4d9] hover:bg-[#282c31] hover:text-[#f3f3ee]"} ${className}`} title="Provider keys and live rate limits">
+          <span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${summary?.personalKeysNeedReentry ? "bg-[#d6b58f]" : !summary?.configured ? "bg-[#a9adb6]" : summary.quota.allUnavailable ? "bg-[#d6b58f]" : "bg-[#a9c9b0]"}`} />
+          <span className="hidden max-w-[96px] truncate min-[480px]:inline sm:max-w-[140px]">{topLabel}</span>
+          <Gauge size={14} className="shrink-0" aria-hidden="true" />
+        </button>
+      </DialogPrimitive.Trigger>
+      <DialogPrimitive.Portal>
+        <DialogPrimitive.Overlay className="fixed inset-0 z-[2147483646] bg-[#090b0d]/75 backdrop-blur-sm data-[state=open]:animate-in data-[state=open]:fade-in-0" />
+        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-[2147483647] flex max-h-[calc(100dvh-1.5rem)] w-[calc(100vw-1.5rem)] max-w-[680px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[22px] border border-[#363a40] bg-[#202327] text-[#f3f3ee] shadow-[0_28px_100px_#0008] outline-none">
+          <header className="flex shrink-0 items-start gap-3 border-b border-[#363a40] px-4 py-4 sm:px-6 sm:py-5">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-[#514a65] bg-[#302c3b] text-[#c4b5fd]"><KeyRound size={18} /></span>
+            <div className="min-w-0 flex-1">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-[.16em] text-[#a9adb6]">Connections</p>
+              <DialogPrimitive.Title className="text-base font-semibold tracking-[-.025em] sm:text-lg">AI provider keys</DialogPrimitive.Title>
+              <DialogPrimitive.Description className="mt-1 text-xs leading-5 text-[#a9adb6]">Your keys, with live usage and automatic failover.</DialogPrimitive.Description>
             </div>
+            <DialogPrimitive.Close className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-[#a9adb6] outline-none transition hover:bg-[#30343a] hover:text-[#f3f3ee] focus-visible:ring-2 focus-visible:ring-[#c4b5fd]" aria-label="Close API key settings"><X size={18} /></DialogPrimitive.Close>
+          </header>
 
-            <div className="scrollbar-none overflow-y-auto p-5">
-              <div className="rounded-2xl border border-[#183d2f] bg-[#0c241c] p-4">
-                <div className="flex items-center gap-2 text-sm font-semibold text-[#4ade80]"><ShieldCheck size={16} /> Private by design</div>
-                <p className="mt-1.5 text-xs leading-5 text-[#86efac]">Keys are encrypted into an HttpOnly, same-site cookie. Canvas code and local storage never receive them after submission. They are sent only from the backend to Groq or Tavily.</p>
-              </div>
+          <div className="min-h-0 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6 [scrollbar-width:thin] [scrollbar-color:#50555d_transparent]">
+            <div className="flex items-start gap-3 rounded-2xl border border-[#394d40] bg-[#252f29] p-3.5">
+              <ShieldCheck size={18} className="mt-0.5 shrink-0 text-[#a9c9b0]" />
+              <div><p className="text-xs font-semibold text-[#c5ddcb]">Saved securely in this browser</p><p className="mt-1 text-xs leading-5 text-[#b0c2b6]">Keys are encrypted in an HttpOnly cookie and sent to Groq or Tavily only by the backend. They never enter canvas data or local storage.</p></div>
+            </div>
+            {summary?.personalKeysNeedReentry && <div className="mt-3 flex items-start gap-2.5 rounded-2xl border border-[#645344] bg-[#302920] p-3.5 text-[#e1c3a2]"><AlertCircle className="mt-0.5 shrink-0" size={16} /><div><p className="text-sm font-semibold">Re-enter your personal keys</p><p className="mt-1 text-xs leading-5">The saved keys could not be decrypted. Paste them again below to update the secure cookie.</p></div></div>}
 
-              {summary?.personalKeysNeedReentry && <div className="mt-3 flex items-start gap-2 rounded-2xl border border-[#5c3018] bg-[#24130a] p-4 text-[#fdba74]"><AlertCircle className="mt-0.5 shrink-0" size={16} /><div><p className="text-sm font-semibold">Re-enter your personal keys</p><p className="mt-1 text-xs leading-5">The saved keys could not be decrypted. Paste them again below to update the secure cookie.</p></div></div>}
-
-              <section className="mt-5" aria-labelledby="quota-heading">
-                <div className="flex items-center justify-between"><h3 id="quota-heading" className="text-sm font-semibold text-[#f3f4f6]">Live Groq status</h3><span className="rounded-full bg-[#181a26] px-2.5 py-1 text-[11px] font-semibold text-[#9ca3af]">{summary?.source === "byok" ? "Personal keys" : summary?.source === "server" ? "Server keys" : "No keys"}</span></div>
-                <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  {(summary?.quota.keys ?? []).map((key) => (
-                    <div key={key.id} className={`rounded-xl border p-3 ${key.id === summary?.quota.activeKeyId ? "border-[#4f46e5] bg-[#161528]" : "border-[#222636] bg-[#12141e]"}`}>
-                      <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${statusColor(key.status)}`} /><span className="text-xs font-semibold text-[#f3f4f6]">Key {key.slot}</span>{key.queuePosition !== undefined && <span className="ml-auto rounded-full bg-[#25203e] px-1.5 py-0.5 text-[9px] font-bold text-[#a5b4fc]">Q{key.queuePosition}</span>}<span className="font-mono text-[10px] text-[#6b7280]">{key.masked}</span></div>
-                      <p className="mt-2 text-[11px] font-medium text-[#d1d5db]">{statusLabel(key.status)}</p>
-                      <p className="mt-1 text-[11px] leading-4 text-[#9ca3af]">{key.remainingDailyTokens !== undefined ? `${key.remainingDailyTokens.toLocaleString()} daily tokens remain` : key.remainingRequests !== undefined ? `${key.remainingRequests.toLocaleString()} requests remain in the reported window` : "Request limits update after use"}</p>
-                      <p className="text-[11px] leading-4 text-[#9ca3af]">{key.retryAt && ["cooldown", "exhausted"].includes(key.status) ? (retryCountdown(key.retryAt, now) ? `Retry window in ${retryCountdown(key.retryAt, now)}` : "Ready to check again") : key.remainingTokens !== undefined ? `${key.remainingTokens.toLocaleString()} tokens remain in the reported window` : "Token limits update after use"}</p>
-                      {key.consecutiveFailures !== undefined && key.consecutiveFailures > 0 && <p className="mt-1 text-[10px] font-medium text-[#f87171]">{key.consecutiveFailures} consecutive failure{key.consecutiveFailures === 1 ? "" : "s"}</p>}
-                    </div>
-                  ))}
-                  {!summary?.quota.keys.length && <div className="sm:col-span-3 rounded-xl border border-dashed border-[#282d3e] bg-[#12141e] p-4 text-center text-sm text-[#9ca3af]">No Groq keys configured yet.</div>}
-                </div>
-
-                {summary?.quota.allUnavailable && (
-                  <div className="mt-3 flex items-start gap-2 rounded-2xl border border-[#5c3018] bg-[#24130a] p-3 text-[#fdba74]">
-                    <AlertCircle className="mt-0.5 shrink-0" size={15} />
-                    <div>
-                      <p className="text-xs font-semibold">{retryView.title}</p>
-                      <p className="mt-0.5 text-[11px] leading-4 text-[#ea580c]">
-                        {retryView.detail}
-                      </p>
-                    </div>
+            <section className="mt-6" aria-labelledby="quota-heading">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 id="quota-heading" className="text-sm font-semibold">Live Groq status</h3><span className="rounded-full border border-[#3c4148] bg-[#282c31] px-2.5 py-1 text-[10px] font-medium text-[#a9adb6]">{summary?.source === "byok" ? "Personal keys" : summary?.source === "server" ? "Server keys" : "No keys"}</span></div>
+              <div className="mt-3 grid gap-2.5 sm:grid-cols-3">
+                {(summary?.quota.keys ?? []).map((key) => (
+                  <div key={key.id} className={`min-w-0 rounded-2xl border p-3.5 ${key.id === summary?.quota.activeKeyId ? "border-[#655b80] bg-[#2d2937]" : "border-[#363a40] bg-[#17191c]"}`}>
+                    <div className="flex items-center gap-2"><span aria-hidden="true" className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusColor(key.status)}`} /><span className="text-xs font-semibold">Key {key.slot}</span>{key.queuePosition !== undefined && <span className="ml-auto rounded-md bg-[#373141] px-1.5 py-0.5 text-[9px] font-semibold text-[#c4b5fd]">Q{key.queuePosition}</span>}<span className="font-mono text-[10px] text-[#a9adb6]">{key.masked}</span></div>
+                    <p className="mt-3 text-[11px] font-medium text-[#e1e2e6]">{statusLabel(key.status)}</p>
+                    <p className="mt-1 text-[11px] leading-[1.7] text-[#a9adb6]">{key.remainingDailyTokens !== undefined ? `${key.remainingDailyTokens.toLocaleString()} daily tokens remain` : key.remainingRequests !== undefined ? `${key.remainingRequests.toLocaleString()} requests remain in the reported window` : "Request limits update after use"}</p>
+                    <p className="text-[11px] leading-[1.7] text-[#a9adb6]">{key.retryAt && ["cooldown", "exhausted"].includes(key.status) ? (retryCountdown(key.retryAt, now) ? `Retry window in ${retryCountdown(key.retryAt, now)}` : "Ready to check again") : key.remainingTokens !== undefined ? `${key.remainingTokens.toLocaleString()} tokens remain in the reported window` : "Token limits update after use"}</p>
+                    {key.consecutiveFailures !== undefined && key.consecutiveFailures > 0 && <p className="mt-1 text-[10px] font-medium text-[#e4aaaa]">{key.consecutiveFailures} consecutive failure{key.consecutiveFailures === 1 ? "" : "s"}</p>}
                   </div>
-                )}
-                <p className="mt-2 text-[11px] leading-4 text-[#6b7280]">Usage and retry times come from Groq. A retry time permits another attempt; it does not guarantee that quota has replenished.</p>
-              </section>
+                ))}
+                {!summary?.quota.keys.length && <div className="rounded-2xl border border-dashed border-[#444950] bg-[#17191c] px-4 py-5 text-center text-xs text-[#a9adb6] sm:col-span-3">Add a Groq key below to start teaching.</div>}
+              </div>
+              {summary?.quota.allUnavailable && <div className="mt-3 flex items-start gap-2.5 rounded-2xl border border-[#645344] bg-[#302920] p-3.5 text-[#e1c3a2]"><AlertCircle className="mt-0.5 shrink-0" size={15} /><div><p className="text-xs font-semibold">{retryView.title}</p><p className="mt-1 text-[11px] leading-5 text-[#c6b49f]">{retryView.detail}</p></div></div>}
+              <p className="mt-2.5 text-[11px] leading-5 text-[#a9adb6]">Usage and retry times come from Groq. A retry time permits another attempt; it does not guarantee that quota has replenished.</p>
+            </section>
 
-              <form onSubmit={save} className="mt-5 border-t border-[#1f2333] pt-5">
-                <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-[#f3f4f6]">Bring your own keys</h3><span className={`text-xs font-medium ${summary?.tavilyConfigured ? "text-[#34d399]" : "text-[#6b7280]"}`}>Tavily {summary?.tavilyConfigured ? "ready" : "not configured"}</span></div>
-                <p className="mt-1 text-xs leading-5 text-[#9ca3af]">The first Groq key stays active. A rate-limited or invalid key moves to the back and the next key is tried immediately.</p>
-                <p className="mt-1 text-xs leading-5 text-[#9ca3af]">To replace Groq keys, enter the complete list in the order you want. Leave all Groq fields blank to keep saved keys while updating Tavily.</p>
-                <div className="mt-3 space-y-2">
-                  {keys.map((key, index) => (
-                    <label key={index} className="block">
-                      <span className="mb-1 block text-xs font-semibold text-[#9ca3af]">Groq key {index + 1}{index === 0 ? "" : " · optional"}</span>
-                      <input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(event) => setKeys((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder="gsk_…" className="h-10 w-full rounded-xl border border-[#262b3c] bg-[#141620] px-3 font-mono text-sm text-[#f3f4f6] outline-none transition focus:border-[#818cf8] focus:ring-3 focus:ring-[#818cf8]/15" />
-                    </label>
-                  ))}
-                  <label className="block pt-1">
-                    <span className="mb-1 block text-xs font-semibold text-[#9ca3af]">Tavily key · optional</span>
-                    <input type="password" autoComplete="off" spellCheck={false} value={tavilyKey} onChange={(event) => setTavilyKey(event.target.value)} placeholder="tvly-…" className="h-10 w-full rounded-xl border border-[#262b3c] bg-[#141620] px-3 font-mono text-sm text-[#f3f4f6] outline-none transition focus:border-[#818cf8] focus:ring-3 focus:ring-[#818cf8]/15" />
-                  </label>
-                </div>
-
-                {message && <div className={`mt-3 flex items-start gap-2 rounded-xl px-3 py-2.5 text-xs ${/saved|removed/i.test(message) ? "bg-[#0c241c] text-[#34d399]" : "bg-[#291216] text-[#f87171]"}`}>{/saved|removed/i.test(message) ? <CheckCircle2 className="mt-0.5 shrink-0" size={14} /> : <AlertCircle className="mt-0.5 shrink-0" size={14} />}<span>{message}</span></div>}
-
-                <div className="mt-4 flex flex-wrap items-center gap-2">
-                  <button type="submit" disabled={saving || (!keys.some((key) => key.trim()) && !tavilyKey.trim())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#6366f1] px-4 text-sm font-semibold text-white transition hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"><Save size={15} /> {saving ? "Saving…" : "Save personal keys"}</button>
-                  {(summary?.source === "byok" || summary?.tavilySource === "byok" || summary?.personalKeysNeedReentry) && <button type="button" disabled={saving} onClick={() => void clearByok()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#522129] bg-[#241216] px-4 text-sm font-semibold text-[#f87171] transition hover:bg-[#33171d] disabled:opacity-40"><Trash2 size={14} /> Remove personal keys</button>}
-                  <button type="button" disabled={saving} onClick={() => void resetEverything()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#262a38] bg-[#141620] px-4 text-sm font-semibold text-[#d1d5db] transition hover:bg-[#1a1d2b] disabled:opacity-40" title="Reset all keys, server caches, and local workspace"><RotateCcw size={14} /> Reset all data & cache</button>
-                </div>
-              </form>
-            </div>
+            <form onSubmit={save} className="mt-6 border-t border-[#363a40] pt-5">
+              <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="text-sm font-semibold">Bring your own keys</h3><span className={`text-[11px] ${summary?.tavilyConfigured ? "text-[#a9c9b0]" : "text-[#a9adb6]"}`}>Tavily {summary?.tavilyConfigured ? "ready" : "not configured"}</span></div>
+              <p className="mt-2 text-xs leading-5 text-[#a9adb6]">The first Groq key stays active. A rate-limited or invalid key moves to the back and the next key is tried immediately.</p>
+              <p className="mt-1 text-xs leading-5 text-[#a9adb6]">Enter the complete Groq list to replace your keys. Leave these fields blank to keep saved keys while updating Tavily.</p>
+              <div className="mt-4 space-y-3">
+                {keys.map((key, index) => <label key={index} className="block"><span className="mb-1.5 block text-xs font-medium text-[#d2d4d9]">Groq key {index + 1}{index === 0 ? "" : " · optional"}</span><input type="password" autoComplete="off" spellCheck={false} value={key} onChange={(event) => setKeys((current) => current.map((item, itemIndex) => itemIndex === index ? event.target.value : item))} placeholder="gsk_…" className="h-11 w-full min-w-0 rounded-xl border border-[#3c4148] bg-[#17191c] px-3.5 font-mono text-base text-[#f3f3ee] outline-none transition placeholder:text-[#737985] focus:border-[#c4b5fd] focus:ring-2 focus:ring-[#c4b5fd]/15 sm:text-sm" /></label>)}
+                <label className="block pt-1"><span className="mb-1.5 block text-xs font-medium text-[#d2d4d9]">Tavily key · optional</span><input type="password" autoComplete="off" spellCheck={false} value={tavilyKey} onChange={(event) => setTavilyKey(event.target.value)} placeholder="tvly-…" className="h-11 w-full min-w-0 rounded-xl border border-[#3c4148] bg-[#17191c] px-3.5 font-mono text-base text-[#f3f3ee] outline-none transition placeholder:text-[#737985] focus:border-[#c4b5fd] focus:ring-2 focus:ring-[#c4b5fd]/15 sm:text-sm" /></label>
+              </div>
+              {message && <div role="status" className={`mt-4 flex items-start gap-2.5 rounded-xl px-3.5 py-3 text-xs leading-5 ${/saved|removed/i.test(message) ? "bg-[#252f29] text-[#b8d4c0]" : "bg-[#35282a] text-[#e4aaaa]"}`}>{/saved|removed/i.test(message) ? <CheckCircle2 className="mt-0.5 shrink-0" size={14} /> : <AlertCircle className="mt-0.5 shrink-0" size={14} />}<span className="min-w-0 break-words">{message}</span></div>}
+              <div className="mt-5 grid gap-2.5 sm:flex sm:flex-wrap">
+                <button type="submit" disabled={saving || (!keys.some((key) => key.trim()) && !tavilyKey.trim())} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#c4b5fd] px-4 py-2.5 text-xs font-semibold text-[#211d2c] outline-none transition hover:bg-[#d3c8ff] focus-visible:ring-2 focus-visible:ring-[#eee8ff] focus-visible:ring-offset-2 focus-visible:ring-offset-[#202327] disabled:cursor-not-allowed disabled:opacity-40"><Save size={15} />{saving ? "Saving…" : "Save personal keys"}</button>
+                {(summary?.source === "byok" || summary?.tavilySource === "byok" || summary?.personalKeysNeedReentry) && <button type="button" disabled={saving} onClick={() => void clearByok()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#5b4548] bg-[#30272a] px-4 py-2.5 text-xs font-medium text-[#e4aaaa] outline-none transition hover:bg-[#3d2e32] focus-visible:ring-2 focus-visible:ring-[#c4b5fd] disabled:opacity-40"><Trash2 size={14} />Remove personal keys</button>}
+                <button type="button" disabled={saving} onClick={() => void resetEverything()} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-[#3c4148] bg-[#282c31] px-4 py-2.5 text-xs font-medium text-[#d2d4d9] outline-none transition hover:bg-[#33383f] focus-visible:ring-2 focus-visible:ring-[#c4b5fd] disabled:opacity-40" title="Reset all keys, server caches, and local workspace"><RotateCcw size={14} />Reset all data & cache</button>
+              </div>
+            </form>
           </div>
-        </div>,
-        document.body,
-      )}
-    </>
+        </DialogPrimitive.Content>
+      </DialogPrimitive.Portal>
+    </DialogPrimitive.Root>
   );
 }

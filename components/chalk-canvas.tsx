@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   createShapeId,
   type Editor,
@@ -450,16 +450,26 @@ interface PresenterCursorState {
   targetBox?: { x: number; y: number; w: number; h: number } | null;
 }
 
-function frameCanvasScene(editor: Editor, duration = 420) {
+function visibleCanvasViewport(editor: Editor, shell: HTMLDivElement | null) {
+  if (!shell || shell.closest("[inert]")) return null;
+  const rect = shell.getBoundingClientRect();
+  const viewport = editor.getViewportScreenBounds();
+  // tldraw clamps a hidden editor's measured dimensions to one pixel.
+  if (rect.width <= 1 || rect.height <= 1 || viewport.width <= 1 || viewport.height <= 1) return null;
+  return viewport;
+}
+
+function frameCanvasScene(editor: Editor, shell: HTMLDivElement | null, duration = 420) {
+  const vp = visibleCanvasViewport(editor, shell);
+  if (!vp) return false;
   const shapes = editor.getCurrentPageShapes();
-  if (!shapes.length) return;
+  if (!shapes.length) return false;
   const bounds = editor.getCurrentPageBounds();
   if (!bounds || bounds.width <= 0 || bounds.height <= 0) {
     editor.zoomToFit({ animation: { duration } });
-    return;
+    return true;
   }
-  const vp = editor.getViewportScreenBounds();
-  const pad = 56;
+  const pad = Math.min(56, vp.width / 4, vp.height / 4);
   const scaleX = (vp.width - pad) / bounds.width;
   const scaleY = (vp.height - pad) / bounds.height;
   // Fit the camera to the infinite page instead of squeezing the diagram.
@@ -468,7 +478,8 @@ function frameCanvasScene(editor: Editor, duration = 420) {
     x: vp.width / (2 * targetZoom) - bounds.midX,
     y: vp.height / (2 * targetZoom) - bounds.midY,
     z: targetZoom,
-  }, { animation: { duration } });
+  }, duration > 0 ? { animation: { duration } } : undefined);
+  return true;
 }
 
 export function ChalkCanvas({
@@ -493,7 +504,12 @@ export function ChalkCanvas({
   onPlaybackState?: (state: CanvasPlaybackState) => void;
 }) {
   const shellRef = useRef<HTMLDivElement | null>(null);
+  const tooltipRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  // Genuine editor input opts out of whole-scene resize fitting. SDK camera
+  // adjustments and workspace separators must not be mistaken for user input.
+  const userCanvasInteractionRef = useRef(false);
+  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 });
   const [mountedEditor, setMountedEditor] = useState<Editor | null>(null);
   const [licenseBlocked, setLicenseBlocked] = useState(false);
   const [layoutError, setLayoutError] = useState<string | null>(null);
@@ -558,8 +574,50 @@ export function ChalkCanvas({
       editorRef.current = null;
       setMountedEditor(null);
       lessonIdRef.current = null;
+      userCanvasInteractionRef.current = false;
     };
   }, []);
+
+  useEffect(() => {
+    const shell = shellRef.current;
+    const editor = mountedEditor;
+    if (!shell || !editor) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const measure = () => {
+      clearTimeout(timer);
+      const rect = shell.getBoundingClientRect();
+      if (rect.width <= 1 || rect.height <= 1 || shell.closest("[inert]")) {
+        // Native SDK shortcuts listen on the document while its instance is
+        // focused. Clear that focus when the mobile tab makes this editor inert.
+        if (editor.getIsFocused()) editor.blur();
+        setHoveredArrow(null);
+        setViewportSize((size) => size.width === 0 && size.height === 0 ? size : { width: 0, height: 0 });
+        return;
+      }
+      // Wait until panel dragging settles. SDK screen bounds are throttled by
+      // 200ms, so refresh them before fitting to avoid using the previous size.
+      timer = setTimeout(() => {
+        if (shell.closest("[inert]")) return;
+        const currentRect = shell.getBoundingClientRect();
+        if (currentRect.width <= 1 || currentRect.height <= 1) return;
+        editor.updateViewportScreenBounds(editor.getContainer());
+        const viewport = visibleCanvasViewport(editor, shell);
+        if (!viewport) return;
+        if (!editor.inputs.getIsPointing() && !userCanvasInteractionRef.current) {
+          frameCanvasScene(editor, shell, 0);
+        }
+        setViewportSize((size) => size.width === viewport.width && size.height === viewport.height
+          ? size : { width: viewport.width, height: viewport.height });
+      }, 120);
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(shell);
+    measure();
+    return () => {
+      clearTimeout(timer);
+      observer.disconnect();
+    };
+  }, [mountedEditor]);
 
   // Synchronize whiteboard shapes on lesson, activeStep, or presentation mode changes
   useEffect(() => {
@@ -596,7 +654,11 @@ export function ChalkCanvas({
     }
     lessonIdRef.current = effectiveLesson.id;
     if (reset) {
-      frameCanvasScene(editor, 0);
+      userCanvasInteractionRef.current = false;
+      if (shellRef.current && !shellRef.current.closest("[inert]")) {
+        editor.updateViewportScreenBounds(editor.getContainer());
+      }
+      frameCanvasScene(editor, shellRef.current, 0);
     }
     // Store updates are synchronous, React shape rendering is not. Wait for a paint
     // before releasing narration, including after a slow dynamic import or ELK layout.
@@ -656,7 +718,50 @@ export function ChalkCanvas({
     setHoveredArrow((prev) => (prev !== null ? null : prev));
   }, []);
 
-  // Camera framing and shape micro-animations during active teaching segment
+  useLayoutEffect(() => {
+    const shell = shellRef.current;
+    const tooltip = tooltipRef.current;
+    if (!hoveredArrow || !shell || !tooltip) return;
+    const bounds = shell.getBoundingClientRect();
+    const pill = tooltip.getBoundingClientRect();
+    tooltip.style.left = `${Math.max(8, Math.min(hoveredArrow.x + 16, bounds.width - pill.width - 8))}px`;
+    tooltip.style.top = `${Math.max(8, Math.min(hoveredArrow.y - pill.height / 2, bounds.height - pill.height - 8))}px`;
+  }, [hoveredArrow, viewportSize]);
+
+  // Resizing or revealing the panel can move the current teaching target outside
+  // the viewport. Recheck its camera separately from shape animation/playback.
+  useEffect(() => {
+    const editor = mountedEditor;
+    if (!editor || !isSpeaking || !activeSegment?.targetIds.length || editor.inputs.getIsPointing()) return;
+    const vp = visibleCanvasViewport(editor, shellRef.current);
+    if (!vp || viewportSize.width <= 1 || viewportSize.height <= 1) return;
+    const bounds = activeSegment.targetIds
+      .map((id) => editor.getShapePageBounds(createShapeId(id.split("#")[0])))
+      .filter((box) => !!box);
+    if (!bounds.length) return;
+    const left = Math.min(...bounds.map((box) => box.minX));
+    const top = Math.min(...bounds.map((box) => box.minY));
+    const right = Math.max(...bounds.map((box) => box.maxX));
+    const bottom = Math.max(...bounds.map((box) => box.maxY));
+    const topLeftVp = editor.pageToViewport({ x: left, y: top });
+    const bottomRightVp = editor.pageToViewport({ x: right, y: bottom });
+    const inset = Math.min(64, vp.width / 8, vp.height / 8);
+    const isComfortablyVisible = topLeftVp.x >= inset && topLeftVp.y >= inset &&
+      bottomRightVp.x <= vp.width - inset && bottomRightVp.y <= vp.height - inset;
+    if (isComfortablyVisible) return;
+    const targetW = Math.max(right - left, 540);
+    const targetH = Math.max(bottom - top, 380);
+    const centerX = (left + right) / 2;
+    const centerY = (top + bottom) / 2;
+    editor.zoomToBounds(
+      { x: centerX - targetW / 2, y: centerY - targetH / 2, w: targetW, h: targetH },
+      { animation: { duration: 420 }, inset,
+        targetZoom: Math.max(0.05, Math.min(0.72, (vp.width - inset * 2) / targetW, (vp.height - inset * 2) / targetH)) }
+    );
+  }, [activeSegment, effectiveLesson, isSpeaking, mountedEditor, viewportSize]);
+
+  // Shape micro-animations during the active teaching segment. Panel resizes
+  // deliberately do not restart these or change the narration readiness gate.
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !isSpeaking || !activeSegment?.targetIds.length) return;
@@ -677,39 +782,6 @@ export function ChalkCanvas({
           rotation: shape.rotation ?? 0,
           opacity: shape.opacity ?? 1,
         });
-      }
-    }
-
-    const bounds = ids.map((id) => editor.getShapePageBounds(id)).filter(Boolean);
-    if (bounds.length) {
-      const left = Math.min(...bounds.map((box) => box!.minX));
-      const top = Math.min(...bounds.map((box) => box!.minY));
-      const right = Math.max(...bounds.map((box) => box!.maxX));
-      const bottom = Math.max(...bounds.map((box) => box!.maxY));
-      const vp = editor.getViewportScreenBounds();
-
-      const topLeftVp = editor.pageToViewport({ x: left, y: top });
-      const bottomRightVp = editor.pageToViewport({ x: right, y: bottom });
-
-      // Only zoom to bounds if the target is outside or too close to viewport edges!
-      // This prevents the camera from abruptly fighting or resetting user panning/zooming.
-      const isComfortablyVisible =
-        topLeftVp.x >= 64 &&
-        topLeftVp.y >= 64 &&
-        bottomRightVp.x <= vp.width - 64 &&
-        bottomRightVp.y <= vp.height - 64;
-
-      if (!isComfortablyVisible) {
-        const targetW = Math.max(right - left, 540);
-        const targetH = Math.max(bottom - top, 380);
-        const centerX = (left + right) / 2;
-        const centerY = (top + bottom) / 2;
-
-        editor.zoomToBounds(
-          { x: centerX - targetW / 2, y: centerY - targetH / 2, w: targetW, h: targetH },
-          { animation: { duration: 420 }, inset: 64,
-            targetZoom: Math.max(0.05, Math.min(0.72, (vp.width - 128) / targetW, (vp.height - 128) / targetH)) }
-        );
       }
     }
 
@@ -860,6 +932,11 @@ export function ChalkCanvas({
       ref={shellRef}
       className={`tldraw-shell relative w-full h-full overflow-hidden ${isPresenting ? "is-presenting" : ""}`}
       aria-label="Interactive lesson whiteboard"
+      onPointerDownCapture={() => { userCanvasInteractionRef.current = true; }}
+      onWheelCapture={() => { userCanvasInteractionRef.current = true; }}
+      onKeyDownCapture={(event) => {
+        if (event.key !== "Tab") userCanvasInteractionRef.current = true;
+      }}
       onPointerMove={handlePointerMove}
       onPointerLeave={() => setHoveredArrow(null)}
     >
@@ -888,22 +965,25 @@ export function ChalkCanvas({
       {/* Interactive Arrow Hover Tooltip Pill */}
       {hoveredArrow && (
         <div
-          className="absolute pointer-events-none z-50 transition-transform duration-75 ease-out"
+          ref={tooltipRef}
+          className="absolute pointer-events-none z-50 overflow-hidden"
           style={{
-            left: `${hoveredArrow.x}px`,
-            top: `${hoveredArrow.y}px`,
-            transform: "translate(16px, -50%)",
+            left: 8,
+            top: 8,
+            width: "max-content",
+            maxWidth: "min(320px, calc(100% - 16px))",
+            maxHeight: "calc(100% - 16px)",
           }}
         >
-          <div className="flex items-center gap-2.5 rounded-xl bg-[#121524]/95 px-3.5 py-2 text-xs backdrop-blur-md border border-cyan-400/40 shadow-[0_4px_24px_rgba(0,0,0,0.85),0_0_14px_rgba(6,182,212,0.3)] text-slate-200">
-            <div className="flex items-center justify-center w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 font-bold text-[11px]">
+          <div className="flex min-w-0 items-center gap-2.5 rounded-xl bg-[#121524]/95 px-3.5 py-2 text-xs backdrop-blur-md border border-cyan-400/40 shadow-[0_4px_24px_rgba(0,0,0,0.85),0_0_14px_rgba(6,182,212,0.3)] text-slate-200">
+            <div className="flex shrink-0 items-center justify-center w-5 h-5 rounded-md bg-cyan-500/20 text-cyan-400 font-bold text-[11px]">
               →
             </div>
-            <div>
+            <div className="min-w-0 [overflow-wrap:anywhere]">
               <div className="font-semibold text-white tracking-wide text-xs">
                 {hoveredArrow.label || "Connection Flow"}
               </div>
-              <div className="text-[10px] text-cyan-300/80 font-mono flex items-center gap-1.5 mt-0.5">
+              <div className="text-[10px] text-cyan-300/80 font-mono flex flex-wrap items-center gap-1.5 mt-0.5">
                 <span>{hoveredArrow.from}</span>
                 <span className="text-slate-500">→</span>
                 <span>{hoveredArrow.to}</span>
