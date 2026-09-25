@@ -282,25 +282,93 @@ function anchorPoint(object: VisualObject, anchor?: VisualConnection["fromAnchor
 
 const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
 
-function syncScene(editor: Editor, lesson: LessonPlan, reset = false) {
+function getProgressiveVisibleObjects(
+  lesson: LessonPlan,
+  activeStep: number,
+  isPresenting: boolean
+): VisualObject[] {
+  // When not presenting or at/past the final segment, show all objects
+  if (!isPresenting || activeStep >= lesson.segments.length - 1) {
+    return lesson.objects;
+  }
+
+  // Accumulate all targets introduced from Step 0 up through the current activeStep
+  const cumulativeTargets = new Set<string>();
+  for (let i = 0; i <= activeStep && i < lesson.segments.length; i++) {
+    const seg = lesson.segments[i];
+    if (seg && Array.isArray(seg.targetIds)) {
+      seg.targetIds.forEach((t) => {
+        cumulativeTargets.add(t);
+        if (t.includes("#")) cumulativeTargets.add(t.split("#")[0]);
+      });
+    }
+  }
+
+  const visible = lesson.objects.filter((obj) => {
+    // Structural backdrops or frame containers remain visible
+    if (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame") return true;
+
+    if (cumulativeTargets.has(obj.id)) return true;
+
+    const objIdLower = obj.id.toLowerCase();
+    const objLabelLower = (obj.label || "").toLowerCase();
+    for (const target of cumulativeTargets) {
+      const tLower = target.toLowerCase();
+      if (
+        objIdLower.includes(tLower) ||
+        tLower.includes(objIdLower) ||
+        objLabelLower.includes(tLower) ||
+        tLower.includes(objLabelLower)
+      ) {
+        return true;
+      }
+    }
+    return false;
+  });
+
+  // Safety fallback: ensure at least proportional objects are visible so canvas is never blank
+  if (visible.length === 0 && lesson.objects.length > 0) {
+    const fraction = Math.min(1, (activeStep + 1) / Math.max(1, lesson.segments.length));
+    const count = Math.max(1, Math.ceil(fraction * lesson.objects.length));
+    return lesson.objects.slice(0, count);
+  }
+
+  return visible;
+}
+
+function syncScene(
+  editor: Editor,
+  lesson: LessonPlan,
+  activeStep: number,
+  isPresenting: boolean,
+  reset = false
+) {
   if (reset) editor.deleteShapes(Array.from(editor.getCurrentPageShapeIds()));
 
-  // 1. All objects and connections from the lesson plan remain visible on the board
-  const visibleObjects = lesson.objects;
+  // 1. Progressively reveal objects synchronously with teaching narration
+  const visibleObjects = getProgressiveVisibleObjects(lesson, activeStep, isPresenting);
   const currentShapeIds = Array.from(editor.getCurrentPageShapeIds());
 
-  // Remove any stale shapes from prior lessons
-  const validObjectShapeIds = new Set(lesson.objects.map((o) => createShapeId(o.id)));
+  // Visible object IDs at current step:
+  const visibleObjectShapeIds = new Set(visibleObjects.map((o) => createShapeId(o.id)));
+  const validLessonShapeIds = new Set(lesson.objects.map((o) => createShapeId(o.id)));
   const validArrowShapeIds = new Set(lesson.connections.map((c) => createShapeId(c.id)));
+
+  // Remove stale shapes from prior lessons, or shapes from future steps during presentation
+  // NEVER delete user-drawn shapes (user shapes do not have chalkieId / chalkieConnection meta)
   const shapesToDelete: TLShapeId[] = [];
   for (const sId of currentShapeIds) {
     const shape = editor.getShape(sId);
     if (!shape) continue;
     const chalkieId = (shape.meta as any)?.chalkieId;
-    if (chalkieId && !validObjectShapeIds.has(sId)) {
-      shapesToDelete.push(sId);
-    } else if (shape.type === "arrow" && !validArrowShapeIds.has(sId)) {
-      shapesToDelete.push(sId);
+    if (chalkieId) {
+      if (!validLessonShapeIds.has(sId) || (isPresenting && !visibleObjectShapeIds.has(sId))) {
+        shapesToDelete.push(sId);
+      }
+    } else if (shape.type === "arrow" && (shape.meta as any)?.chalkieConnection) {
+      if (!validArrowShapeIds.has(sId)) {
+        shapesToDelete.push(sId);
+      }
     }
   }
   if (shapesToDelete.length) {
@@ -604,27 +672,27 @@ export function ChalkCanvas({
       editor.user.updateUserPreferences({ colorScheme: "dark" });
     } catch {}
     if (effectiveLesson && effectiveLesson.objects.length > 0) {
-      syncScene(editor, effectiveLesson, true);
+      syncScene(editor, effectiveLesson, activeStep, isPresenting, true);
       lessonIdRef.current = effectiveLesson.id;
     }
     window.setTimeout(() => {
       frameCanvasScene(editor, 400);
     }, 100);
-  }, [effectiveLesson]);
+  }, [effectiveLesson, activeStep, isPresenting]);
 
-  // Synchronize whiteboard shapes on lesson or layout changes
+  // Synchronize whiteboard shapes on lesson, activeStep, or presentation mode changes
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !effectiveLesson || !effectiveLesson.objects.length) return;
     const reset = lessonIdRef.current !== effectiveLesson.id;
-    syncScene(editor, effectiveLesson, reset);
+    syncScene(editor, effectiveLesson, activeStep, isPresenting, reset);
     lessonIdRef.current = effectiveLesson.id;
     if (reset) {
       window.setTimeout(() => {
         frameCanvasScene(editor, 500);
       }, 60);
     }
-  }, [effectiveLesson]);
+  }, [effectiveLesson, activeStep, isPresenting]);
 
   // Interactive Arrow Hover Detection: inspect arrow under pointer with generous margin
   const handlePointerMove = useCallback((e: React.PointerEvent) => {

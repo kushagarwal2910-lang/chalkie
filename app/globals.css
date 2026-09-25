@@ -70,9 +70,10 @@ button { color: inherit; }
 .tldraw-shell .tl-container { background: #0c0d12; color-scheme: dark; }
 .tldraw-shell .tl-background { background: #0c0d12 !important; }
 .tldraw-shell .tlui-layout__top,
-.tldraw-shell .tlui-layout__bottom { z-index: 10; }
-.tldraw-shell.is-presenting .tlui-layout__top,
-.tldraw-shell.is-presenting .tlui-layout__bottom { opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
+.tldraw-shell .tlui-layout__bottom {
+  z-index: 10;
+  pointer-events: auto !important;
+}
 
 /* Tldraw Arrow Label Polish: sleek, single-line, crystal-clear typography */
 .tl-text-label {
