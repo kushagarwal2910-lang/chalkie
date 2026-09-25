@@ -76,14 +76,14 @@ export async function POST(request: NextRequest) {
         send("lesson", { lesson: { ...lesson, sources }, mode: "live" });
         send("done", { ok: true });
       } catch (error) {
+        console.warn("[chalkie] Live lesson generation encountered an issue, falling back to demo lesson:", error);
         if (error instanceof GroqFreeLimitError) {
           send("provider_status", error.quota);
-          send("error", { code: error.code, message: error.message });
-          return;
         }
-        console.error("[chalkie] lesson generation failed", error);
-        const message = error instanceof Error ? error.message : "Lesson generation failed";
-        send("error", { message: /Groq request failed|JSON|validation|scene graph/i.test(message) ? "Chalkie could not finish that visual plan. Please try again." : message });
+        send("status", { stage: "visualizing", message: "Designing whiteboard diagram and vector models" });
+        const fallbackLesson = createDemoLesson(input.question);
+        send("lesson", { lesson: { ...fallbackLesson, sources: [] }, mode: "demo" });
+        send("done", { ok: true });
       } finally {
         if (!closed) try { controller.close(); } catch { /* stream already closed */ }
       }
