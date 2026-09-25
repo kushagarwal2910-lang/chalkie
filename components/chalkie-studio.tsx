@@ -23,7 +23,6 @@ import {
   Share2,
   Sparkles,
   Volume2,
-  WandSparkles,
   Waves,
   X,
   AlertTriangle,
@@ -36,13 +35,15 @@ import {
   PanelRightOpen,
   SlidersHorizontal,
 } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { followUpPlanSchema, lessonPlanSchema, type LessonPlan, type LessonSegment } from "@/lib/lesson-schema";
 import { useRealtime } from "@/hooks/use-realtime";
 import { clearAllClientStorage, loadCurrentLesson, loadLessonById, saveCurrentLesson } from "@/lib/client-storage";
 import { repairAndValidateLessonPlan } from "@/lib/lesson-layout";
 import { mergeFollowUpLesson } from "@/lib/follow-up";
-import { preferredGroqKeyId, ProviderControl, publishProviderStatus, type ProviderQuota } from "@/components/provider-control";
+import { PROVIDER_CONFIGURATION_EVENT, PROVIDER_STATUS_EVENT, ProviderControl, publishProviderStatus, type ProviderQuota } from "@/components/provider-control";
+import { newestProviderQuota, parseProviderFailure, providerFailureError, providerKeysetIdentity, providerRetryReducer, providerRetryView, quotaMatchesConfiguration, sanitizeProviderQuota, type ProviderRetryState } from "@/lib/provider-retry";
+import { readProviderEventStream } from "@/lib/provider-event-stream";
 import { ChalkieIcon } from "@/components/chalkie-icon";
 import { VoiceSettingsDialog } from "@/components/voice-settings-dialog";
 import { formatNarrationForSpeech } from "@/lib/speech-formatter";
@@ -77,6 +78,13 @@ const emptyLesson: LessonPlan = {
   segments: [],
 };
 
+type RetryOperation =
+  | { kind: "lesson"; question: string }
+  | { kind: "followup"; question: string; currentLesson: LessonPlan }
+  | { kind: "transcribe"; audio: Blob }
+  | { kind: "speech"; lessonId: string; stepIndex: number };
+const initialRetryState: ProviderRetryState<RetryOperation> = { requestId: 0, status: "idle", operation: null, failure: null };
+
 function CanvasLoading() {
   return (
     <div className="soft-grid absolute inset-0 grid place-items-center bg-[#0c0d12] text-[#e5e7eb]">
@@ -86,38 +94,6 @@ function CanvasLoading() {
       </div>
     </div>
   );
-}
-
-function IconButton({ label, children, className = "", onClick }: { label: string; children: React.ReactNode; className?: string; onClick?: () => void }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border border-[#222636] bg-[#141620] text-[#9ca3af] transition hover:border-[#32384e] hover:bg-[#1a1d2b] hover:text-[#f3f4f6] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#818cf8] ${className}`}
-    >
-      {children}
-    </button>
-  );
-}
-
-async function readEventStream(response: Response, onEvent: (type: string, data: Record<string, unknown>) => void) {
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  while (true) {
-    const { done, value } = await reader.read();
-    buffer += decoder.decode(value, { stream: !done });
-    const blocks = buffer.split("\n\n");
-    buffer = blocks.pop() ?? "";
-    for (const block of blocks) {
-      const type = block.match(/^event:\s*(.+)$/m)?.[1] ?? "message";
-      const raw = block.match(/^data:\s*(.+)$/m)?.[1];
-      if (raw) onEvent(type, JSON.parse(raw) as Record<string, unknown>);
-    }
-    if (done) break;
-  }
 }
 
 const STOP_WORDS = new Set([
@@ -184,9 +160,11 @@ export function ChalkieStudio() {
     setTimeout(() => window.dispatchEvent(new Event("resize")), 320);
   };
   const [toast, setToast] = useState<string | null>(null);
-  const [degradation, setDegradation] = useState<{ active: boolean; message: string; nextRetryAt?: number } | null>(null);
-  const degradationTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [degradationCountdown, setDegradationCountdown] = useState<string | null>(null);
+  const [providerQuota, setProviderQuota] = useState<ProviderQuota | null>(null);
+  const [retryState, dispatchRetry] = useReducer(providerRetryReducer<RetryOperation>, initialRetryState);
+  const providerRequestIdRef = useRef(0);
+  const configuredKeysetRef = useRef<string | null>(null);
+  const [retryNow, setRetryNow] = useState(() => Date.now());
   const [sessionId] = useState(() => {
     if (typeof window === "undefined") return "chalkie-session-pending";
     const stored = window.localStorage.getItem("chalkie:session");
@@ -211,13 +189,14 @@ export function ChalkieStudio() {
   const startupHandledRef = useRef(false);
   const voiceMonitorRef = useRef<number | null>(null);
   const voiceContextRef = useRef<AudioContext | null>(null);
-  const preferredGroqKeyRef = useRef<string | undefined>(undefined);
   const { status: connectionStatus, send: sendRealtime } = useRealtime(sessionId, (event) => {
     if (event.type === "interrupt") stopPlayback(false);
   });
   const displaySources = lesson.sources.filter((source) => `${source.title} ${source.publisher}`.toLowerCase().includes(sourceQuery.toLowerCase()));
   const hasLesson = lesson.segments.length > 0;
-  const isBusy = isGenerating || isFollowUpGenerating;
+  const isBusy = isGenerating || isFollowUpGenerating || voiceState === "transcribing";
+  const retryView = providerRetryView(retryState.failure, providerQuota, retryNow);
+  const showProviderBanner = retryState.status === "failed" || providerQuota?.allUnavailable;
   const totalDuration = Math.round(lesson.segments.reduce((total, segment) => total + segment.durationMs, 0) / 1000);
   const handleCanvasPlaybackState = useCallback((state: CanvasPlaybackState) => {
     canvasGate.update(state);
@@ -232,8 +211,29 @@ export function ChalkieStudio() {
   }, [canvasError]);
 
   useEffect(() => {
-    preferredGroqKeyRef.current = preferredGroqKeyId();
+    const configure = (event: Event) => {
+      const quota = sanitizeProviderQuota((event as CustomEvent).detail);
+      if (!quota) return;
+      configuredKeysetRef.current = providerKeysetIdentity(quota);
+      setProviderQuota(current => newestProviderQuota(current, quota));
+    };
+    const handle = (event: Event) => {
+      const quota = sanitizeProviderQuota((event as CustomEvent).detail);
+      if (quota && quotaMatchesConfiguration(configuredKeysetRef.current, quota)) setProviderQuota(current => newestProviderQuota(current, quota));
+    };
+    window.addEventListener(PROVIDER_CONFIGURATION_EVENT, configure);
+    window.addEventListener(PROVIDER_STATUS_EVENT, handle);
+    return () => {
+      window.removeEventListener(PROVIDER_CONFIGURATION_EVENT, configure);
+      window.removeEventListener(PROVIDER_STATUS_EVENT, handle);
+    };
   }, []);
+
+  useEffect(() => {
+    if (!showProviderBanner) return;
+    const timer = window.setInterval(() => setRetryNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [showProviderBanner]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
@@ -285,6 +285,9 @@ export function ChalkieStudio() {
     }).catch(() => undefined);
 
     return () => { cancelled = true; };
+    // The URL question/restoration is consumed once on mount; changing the
+    // request callback during playback must not generate the initial topic again.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -294,6 +297,7 @@ export function ChalkieStudio() {
       if (targetId && targetId !== lesson.id) {
         void loadLessonById(targetId).then((stored) => {
           if (stored) {
+            clearPendingProviderRequest();
             stopPlayback(false);
             setRevealedStep(null);
             try {
@@ -308,6 +312,9 @@ export function ChalkieStudio() {
     };
     window.addEventListener("popstate", handleUrlChange);
     return () => window.removeEventListener("popstate", handleUrlChange);
+    // Playback/request cancellation uses refs. Rebind only when the displayed
+    // lesson identity changes, rather than on each narration render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lesson.id]);
 
   useEffect(() => {
@@ -350,43 +357,45 @@ export function ChalkieStudio() {
   }
 
   function handleProviderStatus(value: unknown) {
-    const quota = value as ProviderQuota;
-    if (!quota?.keys || !Array.isArray(quota.keys)) return;
-    if (quota.activeKeyId) preferredGroqKeyRef.current = quota.activeKeyId;
+    const quota = sanitizeProviderQuota(value);
+    if (!quota || !quotaMatchesConfiguration(configuredKeysetRef.current, quota)) return;
+    setProviderQuota(current => newestProviderQuota(current, quota));
     publishProviderStatus(quota);
+  }
 
-    // Degradation state management
-    if (quota.allUnavailable) {
-      const reason = (quota as Record<string, unknown>).degradationReason as string | undefined;
-      const nextRetryAt = (quota as Record<string, unknown>).nextRetryAt as number | undefined;
-      const messages: Record<string, string> = {
-        all_keys_exhausted: "All Groq API keys have hit their daily limit.",
-        all_keys_invalid: "All Groq API keys are invalid. Please re-enter your keys.",
-        cooldown_active: "All Groq API keys are cooling down.",
-        no_keys: "No Groq API keys configured.",
-      };
-      setDegradation({ active: true, message: messages[reason ?? "no_keys"] ?? "All keys unavailable.", nextRetryAt });
-      // Start countdown timer
-      if (nextRetryAt && nextRetryAt > Date.now()) {
-        if (degradationTimerRef.current) clearInterval(degradationTimerRef.current);
-        degradationTimerRef.current = setInterval(() => {
-          const remaining = Math.max(0, nextRetryAt - Date.now());
-          if (remaining <= 0) {
-            setDegradationCountdown(null);
-            if (degradationTimerRef.current) clearInterval(degradationTimerRef.current);
-            return;
-          }
-          const minutes = Math.floor(remaining / 60_000);
-          const seconds = Math.floor((remaining % 60_000) / 1000);
-          setDegradationCountdown(minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`);
-        }, 1000);
-      }
-    } else if (degradation?.active) {
-      // Keys recovered — auto-dismiss
-      setDegradation(null);
-      setDegradationCountdown(null);
-      if (degradationTimerRef.current) clearInterval(degradationTimerRef.current);
-      notify("Groq API key recovered — you can ask questions again");
+  function beginProviderRequest(operation: RetryOperation) {
+    const requestId = ++providerRequestIdRef.current;
+    dispatchRetry({ type: "begin", requestId, operation });
+    setRetryNow(Date.now());
+    return requestId;
+  }
+
+  function clearPendingProviderRequest() {
+    abortRef.current?.abort();
+    dispatchRetry({ type: "clear", requestId: ++providerRequestIdRef.current });
+    setIsGenerating(false);
+    setIsFollowUpGenerating(false);
+  }
+
+  function failProviderRequest(requestId: number, error: unknown, fallback: string) {
+    if (requestId !== providerRequestIdRef.current) return;
+    stopPlayback(false);
+    const failure = parseProviderFailure(error, fallback);
+    if (failure.quota) handleProviderStatus(failure.quota);
+    dispatchRetry({ type: "fail", requestId, failure });
+    setGenerationStage("Request paused");
+    setRetryNow(Date.now());
+  }
+
+  async function retryFailedRequest() {
+    const operation = retryState.operation;
+    if (!operation || retryState.status !== "failed" || isBusy || !retryView.canRetry) return;
+    if (operation.kind === "lesson") await generateLesson(operation.question);
+    else if (operation.kind === "followup") await askFollowUp(operation.question, operation.currentLesson);
+    else if (operation.kind === "transcribe") await transcribeQuestion(operation.audio);
+    else if (operation.lessonId === lesson.id) {
+      const run = ++playbackRunRef.current;
+      await playStep(operation.stepIndex, run);
     }
   }
 
@@ -420,7 +429,10 @@ export function ChalkieStudio() {
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const requestId = beginProviderRequest({ kind: "lesson", question });
+    const current = () => abortRef.current === controller && !controller.signal.aborted;
     setIsGenerating(true);
+    setIsFollowUpGenerating(false);
     setVoiceState("thinking");
     setLastHeard(question);
     setGenerationStage("Understanding the question");
@@ -431,55 +443,58 @@ export function ChalkieStudio() {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, sessionId, useWeb: true, preferredGroqKeyId: preferredGroqKeyRef.current }),
+        body: JSON.stringify({ question, sessionId, useWeb: true }),
       });
-      if (!response.ok || !response.body) throw new Error("The lesson connection could not be established");
-      await readEventStream(response, (type, data) => {
+      if (!response.ok) throw providerFailureError(await response.json().catch(() => ({})), "The lesson connection could not be established");
+      if (!response.body) throw new Error("The lesson connection could not be established");
+      let generated: LessonPlan | undefined;
+      await readProviderEventStream(response, (type, data) => {
+        if (!current()) return;
         if (type === "status") setGenerationStage(String(data.message ?? "Working"));
         if (type === "provider_status") handleProviderStatus(data);
         if (type === "sources" && Array.isArray(data.sources)) {
           const indexedSources = data.sources as LessonPlan["sources"];
-          setLesson((current) => ({ ...current, question: current.question || question, sources: indexedSources }));
           setGenerationStage(`Indexed ${indexedSources.length} sources for this lesson`);
         }
         if (type === "lesson" && data.lesson) {
-          const generated = data.lesson as LessonPlan;
-          pendingAutoplayRef.current = 0;
-          setIsPlaying(true);
-          setRevealedStep(-1);
-          setLesson({ ...generated, id: `${generated.id.slice(0, 56)}-${Date.now()}` });
-          setActiveStep(0);
-          setLastAnswer("");
-          setGenerationStage(data.mode === "demo" ? "Demo lesson ready" : "Lesson ready");
-          notify(data.mode === "demo" ? "Demo mode · add API keys for live research" : "Your visual lesson is ready");
+          if (data.mode === "demo") throw providerFailureError({ code: "PROVIDER_UNAVAILABLE", message: "A live lesson could not be generated. Check your provider keys and retry." });
+          generated = lessonPlanSchema.parse(data.lesson);
         }
         if (type === "error") {
-          if (data.code === "FREE_LIMIT_REACHED") setGenerationStage("FREE limit reached");
-          else if (data.code === "NO_KEYS_CONFIGURED") {
-            setGenerationStage("No Groq keys configured");
-            setDegradation({
-              active: true,
-              message: "No Groq API keys configured. Click 'Manage keys' to add your Groq key to generate custom visual lessons.",
-            });
-          }
-          throw new Error(String(data.message ?? "Lesson generation failed"));
+          throw providerFailureError(data, "Lesson generation failed");
         }
+        if (type === "done" && data.ok === false) throw new Error("The lesson could not be completed. Retry your request.");
       });
+      if (!current()) return;
+      if (!generated) throw new Error("The lesson connection ended before a lesson was received.");
+      dispatchRetry({ type: "complete", requestId });
+      pendingAutoplayRef.current = 0;
+      setIsPlaying(true);
+      setRevealedStep(-1);
+      setLesson({ ...generated, id: `${generated.id.slice(0, 56)}-${Date.now()}` });
+      setActiveStep(0);
+      setLastAnswer("");
+      setGenerationStage("Lesson ready");
+      notify("Your visual lesson is ready");
     } catch (error) {
-      if ((error as Error).name !== "AbortError") notify(error instanceof Error ? error.message : "Lesson generation failed");
+      if (current() && (error as Error).name !== "AbortError") failProviderRequest(requestId, error, "Lesson generation failed");
     } finally {
-      setIsGenerating(false);
-      if (pendingAutoplayRef.current === null && !playbackAbortRef.current) setVoiceState("idle");
+      if (abortRef.current === controller) {
+        setIsGenerating(false);
+        if (pendingAutoplayRef.current === null && !playbackAbortRef.current) setVoiceState("idle");
+      }
     }
   }
 
-  async function askFollowUp(question: string) {
-    const currentLesson = lesson;
+  async function askFollowUp(question: string, currentLesson: LessonPlan = lesson) {
     stopPlayback(true);
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
+    const requestId = beginProviderRequest({ kind: "followup", question, currentLesson });
+    const current = () => abortRef.current === controller && !controller.signal.aborted;
     setIsFollowUpGenerating(true);
+    setIsGenerating(false);
     setVoiceState("thinking");
     setLastHeard(question);
     setGenerationStage("Understanding your doubt");
@@ -490,10 +505,13 @@ export function ChalkieStudio() {
         method: "POST",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, sessionId, currentLesson, preferredGroqKeyId: preferredGroqKeyRef.current }),
+        body: JSON.stringify({ question, sessionId, currentLesson }),
       });
-      if (!response.ok || !response.body) throw new Error("The follow-up connection could not be established");
-      await readEventStream(response, (type, data) => {
+      if (!response.ok) throw providerFailureError(await response.json().catch(() => ({})), "The follow-up connection could not be established");
+      if (!response.body) throw new Error("The follow-up connection could not be established");
+      let generated: ReturnType<typeof followUpPlanSchema.parse> | undefined;
+      await readProviderEventStream(response, (type, data) => {
+        if (!current()) return;
         if (type === "status") {
           const message = String(data.message ?? "Working");
           setGenerationStage(message);
@@ -507,29 +525,31 @@ export function ChalkieStudio() {
           setGenerationStage(`Sketching ${String(data.label || "the next visual")} · ${Number(data.index) + 1}/${Number(data.total)}`);
         }
         if (type === "followup" && data.plan) {
-          const plan = followUpPlanSchema.parse(data.plan);
-          const merged = mergeFollowUpLesson(currentLesson, plan);
-          pendingAutoplayRef.current = merged.startIndex;
-          setLastAnswer(plan.answer);
-          setActiveStep(merged.startIndex);
-          setRevealedStep(merged.startIndex - 1);
-          setIsPlaying(true);
-          setVoiceState("thinking");
-          setLesson(merged.lesson);
-          setGenerationStage(plan.coverage === "append" ? "Teaching the new connected visual" : "Pointing through the answer");
-          notify(plan.coverage === "append" ? "New explanation added beside the lesson" : "Answering from the current board");
+          if (data.mode === "demo") throw providerFailureError({ code: "PROVIDER_UNAVAILABLE", message: "A live answer could not be generated. Check your provider keys and retry." });
+          generated = followUpPlanSchema.parse(data.plan);
         }
         if (type === "error") {
-          if (data.code === "FREE_LIMIT_REACHED") setGenerationStage("FREE limit reached");
-          throw new Error(String(data.message ?? "Follow-up failed"));
+          throw providerFailureError(data, "Follow-up failed");
         }
+        if (type === "done" && data.ok === false) throw new Error("The answer could not be completed. Retry your request.");
       });
+      if (!current()) return;
+      if (!generated) throw new Error("The connection ended before an answer was received.");
+      const merged = mergeFollowUpLesson(currentLesson, generated);
+      dispatchRetry({ type: "complete", requestId });
+      pendingAutoplayRef.current = merged.startIndex;
+      setLastAnswer(generated.answer);
+      setActiveStep(merged.startIndex);
+      setRevealedStep(merged.startIndex - 1);
+      setIsPlaying(true);
+      setVoiceState("thinking");
+      setLesson(merged.lesson);
+      setGenerationStage(generated.coverage === "append" ? "Teaching the new connected visual" : "Pointing through the answer");
+      notify(generated.coverage === "append" ? "New explanation added beside the lesson" : "Answering from the current board");
     } catch (error) {
-      if ((error as Error).name !== "AbortError") notify(error instanceof Error ? error.message : "Follow-up failed");
-      setVoiceState("idle");
-      setIsPlaying(false);
+      if (current() && (error as Error).name !== "AbortError") failProviderRequest(requestId, error, "Follow-up failed");
     } finally {
-      setIsFollowUpGenerating(false);
+      if (abortRef.current === controller) setIsFollowUpGenerating(false);
     }
   }
 
@@ -605,10 +625,11 @@ export function ChalkieStudio() {
     try {
       let recording: Blob | null = null;
       if (process.env.NEXT_PUBLIC_USE_GROQ_TTS === "true") {
+        const requestId = beginProviderRequest({ kind: "speech", lessonId: lesson.id, stepIndex: index });
         try {
           const response = await fetch("/api/speech", {
             method: "POST", signal, headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: spokenNarration, sessionId, preferredGroqKeyId: preferredGroqKeyRef.current }),
+            body: JSON.stringify({ text: spokenNarration, sessionId }),
           });
           if (!isCurrent()) return;
           const providerHeader = response.headers.get("x-chalkie-provider-status");
@@ -616,10 +637,14 @@ export function ChalkieStudio() {
             try { handleProviderStatus(JSON.parse(decodeURIComponent(providerHeader))); }
             catch { /* ignore malformed optional status */ }
           }
-          if (response.ok) recording = await response.blob();
+          if (!response.ok) throw providerFailureError(await response.json().catch(() => ({})), "Voice generation failed");
+          recording = await response.blob();
+          if (!isCurrent()) return;
+          dispatchRetry({ type: "complete", requestId });
         } catch (error) {
           if (!isCurrent()) return;
-          console.warn("[chalkie] speech request failed; using device voice", error);
+          failProviderRequest(requestId, error, "Voice generation failed");
+          return;
         }
       }
       if (!isCurrent()) return;
@@ -671,6 +696,35 @@ export function ChalkieStudio() {
     }
   }
 
+  async function transcribeQuestion(audio: Blob) {
+    stopPlayback(true);
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+    const current = () => abortRef.current === controller && !controller.signal.aborted;
+    const requestId = beginProviderRequest({ kind: "transcribe", audio });
+    const form = new FormData();
+    form.set("audio", audio, "question.webm");
+    form.set("sessionId", sessionId);
+    setVoiceState("transcribing");
+    setGenerationStage("Transcribing your question");
+    try {
+      const response = await fetch("/api/transcribe", { method: "POST", body: form, signal: controller.signal });
+      const data = await response.json() as { text?: string; error?: string; code?: string; providerStatus?: ProviderQuota };
+      if (!current()) return;
+      if (data.providerStatus) handleProviderStatus(data.providerStatus);
+      if (!response.ok) throw providerFailureError(data, "Transcription failed");
+      const transcript = data.text?.trim() || "";
+      if (!transcript) throw new Error("No question was detected in the recording. Try again or type your question.");
+      dispatchRetry({ type: "complete", requestId });
+      setPrompt("");
+      setLastHeard(transcript);
+      await askQuestion(transcript);
+    } catch (error) {
+      if (current() && (error as Error).name !== "AbortError") failProviderRequest(requestId, error, "Transcription failed");
+    }
+  }
+
   async function toggleRecording() {
     if (isRecording) {
       recorderRef.current?.stop();
@@ -689,26 +743,7 @@ export function ChalkieStudio() {
         await voiceContextRef.current?.close().catch(() => undefined);
         voiceContextRef.current = null;
         stream.getTracks().forEach((track) => track.stop());
-        const form = new FormData();
-        form.set("audio", new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" }), "question.webm");
-        form.set("sessionId", sessionId);
-        if (preferredGroqKeyRef.current) form.set("preferredGroqKeyId", preferredGroqKeyRef.current);
-        setVoiceState("transcribing");
-        setGenerationStage("Transcribing your question");
-        try {
-          const response = await fetch("/api/transcribe", { method: "POST", body: form });
-          const data = await response.json() as { text?: string; error?: string; code?: string; providerStatus?: ProviderQuota };
-          if (data.providerStatus) handleProviderStatus(data.providerStatus);
-          if (!response.ok) throw new Error(data.error || "Transcription failed");
-          const transcript = data.text?.trim() || "";
-          if (!transcript) throw new Error("I could not hear a question. Please try again.");
-          setPrompt("");
-          setLastHeard(transcript);
-          await askQuestion(transcript);
-        } catch (error) {
-          setVoiceState("idle");
-          notify(error instanceof Error ? error.message : "Transcription failed");
-        }
+        await transcribeQuestion(new Blob(audioChunksRef.current, { type: recorder.mimeType || "audio/webm" }));
       };
       recorder.start();
       recorderRef.current = recorder;
@@ -822,17 +857,17 @@ export function ChalkieStudio() {
   return (
     <main className="h-dvh min-h-[680px] bg-[#090a0f] text-[#f3f4f6]">
       <div className="flex h-full flex-col overflow-hidden bg-[#090a0f]">
-        {degradation?.active && (
-          <div className="flex shrink-0 items-center gap-3 border-b border-[#5c3018] bg-gradient-to-r from-[#24130a] to-[#1a0e07] px-4 py-2.5 sm:px-5">
+        {showProviderBanner && (
+          <div role="alert" className="flex shrink-0 flex-wrap items-center gap-3 border-b border-[#5c3018] bg-gradient-to-r from-[#24130a] to-[#1a0e07] px-4 py-2.5 sm:px-5">
             <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#452210] text-[#fb923c]">
               <AlertTriangle size={15} />
             </span>
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-[#fdba74]">{degradation.message}</p>
-              <p className="mt-0.5 text-xs text-[#ea580c]">
-                {degradationCountdown ? `Next key available in ${degradationCountdown}` : degradation.nextRetryAt ? `Recovery expected at ${new Date(degradation.nextRetryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "Add another Groq key or wait for a reset"}
-              </p>
+              <p className="text-sm font-semibold text-[#fdba74]">{retryView.title}</p>
+              <p className="mt-0.5 text-xs text-[#fdba74]/80">{retryView.detail}</p>
+              {retryState.status === "failed" && retryState.operation && "question" in retryState.operation && <p className="mt-1 max-w-xl truncate text-xs text-[#fed7aa]">Pending {retryState.operation.kind === "followup" ? "follow-up" : "lesson"}: {retryState.operation.question}</p>}
             </div>
+            {retryState.status === "failed" && <button type="button" onClick={() => void retryFailedRequest()} disabled={isBusy || !retryView.canRetry} className="inline-flex h-8 items-center gap-1.5 rounded-full bg-[#fb923c] px-3 text-xs font-semibold text-[#24130a] transition hover:bg-[#fdba74] disabled:cursor-not-allowed disabled:opacity-40"><RotateCcw size={13} /> Retry request</button>}
             <button type="button" onClick={() => { const btn = document.querySelector<HTMLButtonElement>("[title='Provider keys and live rate limits']"); btn?.click(); }} className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#5c3018] bg-[#24130a] px-3 text-xs font-semibold text-[#fdba74] shadow-sm transition hover:bg-[#331b0e]">
               <KeyRound size={13} /> Manage keys
             </button>
@@ -915,6 +950,8 @@ export function ChalkieStudio() {
               type="button"
               onClick={async () => {
                 if (!confirm("Clear this lesson, reset server research cache, and start fresh?")) return;
+                clearPendingProviderRequest();
+                stopPlayback(true);
                 await clearAllClientStorage();
                 try { await fetch("/api/reset", { method: "POST" }); } catch { /* ignore */ }
                 setLesson(emptyLesson);
@@ -1187,7 +1224,7 @@ export function ChalkieStudio() {
                   }
                   className="max-h-24 min-h-9 min-w-0 flex-1 resize-none bg-transparent px-1 py-2 text-base leading-5 text-[#f3f4f6] outline-none placeholder:text-[#6b7280]"
                 />
-                <button type="submit" aria-label="Send question" title="Send question" className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#6366f1] text-white transition hover:scale-[1.04] hover:bg-[#4f46e5] disabled:opacity-35" disabled={!prompt.trim() || isBusy || degradation?.active}>
+                <button type="submit" aria-label="Send question" title="Send question" className="mb-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#6366f1] text-white transition hover:scale-[1.04] hover:bg-[#4f46e5] disabled:opacity-35" disabled={!prompt.trim() || isBusy}>
                   {isBusy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" /> : <Send size={16} />}
                 </button>
               </form>

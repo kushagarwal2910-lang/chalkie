@@ -6,7 +6,7 @@ export async function GET() {
   const providers = await resolveProviderCredentials();
   return Response.json({
     ok: true,
-    mode: providers.groqKeys.length ? "live" : "demo",
+    mode: providers.groqKeys.length ? "live" : "needs_keys",
     services: {
       groq: providers.groqKeys.length > 0,
       groqKeyCount: providers.groqKeys.length,

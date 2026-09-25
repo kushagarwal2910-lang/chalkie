@@ -163,9 +163,13 @@ flowchart TD
 - **Sticky 3-Key Failover:** Configurable via `.env.local` or BYOK modal (`GROQ_API_KEY`, `GROQ_API_KEY_2`, `GROQ_API_KEY_3`).
 - **Quota Tracking & Auto-Failover:** If an active key encounters rate limits (HTTP 429) or authentication errors, the pool instantly switches to the next healthy key without interrupting the generation.
 - **AES-256-GCM Cookie Encryption:** User-supplied BYOK keys are encrypted with authenticated AES-256-GCM and stored in secure HttpOnly cookies (`/api/byok`).
+- **Ordered queue:** Use key 1 until a retriable failure, move it to the back, then try key 2 and key 3. A recovered key stays at the back; status refreshes and new lessons do not pin the first key again. Transcription and optional Groq speech use the same pool. Request validation errors do not invalidate good keys.
+- **Tavily BYOK:** Save a personal Tavily key alongside Groq keys, or independently. Leaving every Groq input blank preserves the saved Groq list. Entering Groq keys replaces the complete list in the entered order.
+- Groq quotas belong to an organization; keys from the same organization share those limits. Retry deadlines use provider headers or retry instructions when available, with a short backoff when no deadline is supplied. In-memory queue state survives navigation, but resets when the server process restarts.
 
-### 8. Zero-Credential Demo Mode
-- If no API keys are configured, Chalkie automatically runs in **Demo Mode**, loading a fully interactive, deterministic multi-layer Neural Network lesson with forward inference, loss calculation, backpropagation formulas, animated weights, and voiceover.
+### 8. Graceful provider errors
+- Missing, rejected, or exhausted keys never substitute a preloaded lesson. Chalkie preserves the existing board and displays a persistent error banner. When Groq supplies a retry deadline, the banner counts down to the earliest usable key and enables retry of the original question, recording, or narration step. Invalid keys require replacement.
+- Chalkie's WebSocket carries live canvas, cursor, and playback events. Groq generation and transcription use its HTTP APIs; lesson updates stream to the browser over SSE. Keys are kept on the backend and are not sent through the WebSocket.
 
 ---
 
@@ -258,7 +262,7 @@ cp .env.example .env.local
 | `EMBEDDING_API_KEY` | Optional | — | Optional embedding provider API key. |
 | `EMBEDDING_MODEL` | Optional | — | Optional embedding model name. |
 
-> **Credential-Free Testing:** When no API keys are provided, Chalkie automatically runs in **Demo Mode**, loading a pre-built interactive Neural Network whiteboard lesson.
+> **Provider setup:** Configure a server Groq key or save personal keys through the provider control. Missing keys show an actionable error; no demo content is substituted. Production BYOK needs a stable `BYOK_ENCRYPTION_SECRET` of at least 32 characters (the Render blueprint generates one). Keep it across deployments so saved cookies remain readable.
 
 ---
 
@@ -281,7 +285,7 @@ npm install
 
 ```bash
 cp .env.example .env.local
-# Add your GROQ_API_KEY and TAVILY_API_KEY (optional for demo mode)
+# Add GROQ_API_KEY, or save a personal Groq key in the app. Tavily is optional.
 ```
 
 ### 3. Run the Development Server
@@ -325,6 +329,9 @@ Chalkie includes automated verification test scripts in `scratch/`:
 ```bash
 # Typecheck TypeScript codebase
 npm run typecheck
+
+# Offline BYOK, quota rotation, error handling, retry state, and WebSocket tests (Node 24+)
+node --test lib/groq-pool-core.test.ts scratch/test-api-failures.mjs scratch/test-byok-credentials.mjs scratch/test-provider-retry.mjs scratch/test-realtime.mjs
 
 # Regression checks for delayed canvas loading, speech timing, buffering, and cancellation
 node --experimental-strip-types --test scratch/test-playback-sync.mjs

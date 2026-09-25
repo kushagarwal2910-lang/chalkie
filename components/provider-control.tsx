@@ -1,42 +1,11 @@
 "use client";
 
 import { AlertCircle, CheckCircle2, Gauge, KeyRound, RotateCcw, Save, ShieldCheck, Trash2, X } from "lucide-react";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { clearAllClientStorage } from "@/lib/client-storage";
-
-type KeyStatus = "unknown" | "active" | "ready" | "cooldown" | "exhausted" | "invalid";
-type DegradationReason = "all_keys_exhausted" | "all_keys_invalid" | "cooldown_active" | "no_keys";
-
-export type ProviderQuota = {
-  source: "byok" | "server" | "none";
-  activeKeyId?: string;
-  allUnavailable: boolean;
-  keys: Array<{
-    id: string;
-    slot: number;
-    masked: string;
-    source: "byok" | "server";
-    status: KeyStatus;
-    remainingRequests?: number;
-    requestLimit?: number;
-    remainingTokens?: number;
-    tokenLimit?: number;
-    remainingDailyTokens?: number;
-    dailyTokenLimit?: number;
-    requestedTokens?: number;
-    resetRequests?: string;
-    resetTokens?: string;
-    retryAt?: number;
-    consecutiveFailures?: number;
-    queuePosition?: number;
-  }>;
-};
-
-export type ProviderQuotaWithDegradation = ProviderQuota & {
-  degradationReason?: DegradationReason;
-  nextRetryAt?: number;
-};
+import { newestProviderQuota, providerKeysetIdentity, providerRetryView, quotaMatchesConfiguration, retryCountdown, sanitizeProviderQuota, type ProviderKeyStatus, type ProviderQuota } from "@/lib/provider-retry";
+export type { ProviderQuota } from "@/lib/provider-retry";
 
 type ProviderSummary = {
   configured: boolean;
@@ -48,27 +17,25 @@ type ProviderSummary = {
   quota: ProviderQuota;
 };
 
-const STATUS_EVENT = "chalkie:provider-status";
+export const PROVIDER_STATUS_EVENT = "chalkie:provider-status";
+export const PROVIDER_CONFIGURATION_EVENT = "chalkie:provider-configuration";
 const STATUS_STORAGE = "chalkie:provider-quota";
 const ACTIVE_KEY_STORAGE = "chalkie:groq-active";
 const BYOK_SAVED_STORAGE = "chalkie:byok-saved";
 
-export function publishProviderStatus(quota: ProviderQuota) {
-  if (typeof window === "undefined" || !quota?.keys) return;
-  window.localStorage.setItem(STATUS_STORAGE, JSON.stringify(quota));
-  if (quota.activeKeyId) window.localStorage.setItem(ACTIVE_KEY_STORAGE, quota.activeKeyId);
-  window.dispatchEvent(new CustomEvent(STATUS_EVENT, { detail: quota }));
-}
-
-export function preferredGroqKeyId() {
-  return typeof window === "undefined" ? undefined : window.localStorage.getItem(ACTIVE_KEY_STORAGE) || undefined;
+export function publishProviderStatus(value: unknown) {
+  if (typeof window === "undefined") return;
+  const quota = sanitizeProviderQuota(value);
+  if (!quota) return;
+  // Status is ephemeral. Queue order belongs to the backend, never a saved pin.
+  window.dispatchEvent(new CustomEvent(PROVIDER_STATUS_EVENT, { detail: quota }));
 }
 
 function shortNumber(value: number) {
   return Intl.NumberFormat("en", { notation: value >= 1000 ? "compact" : "standard", maximumFractionDigits: 1 }).format(value);
 }
 
-function statusLabel(status: KeyStatus) {
+function statusLabel(status: ProviderKeyStatus) {
   if (status === "active") return "Active";
   if (status === "ready") return "Ready";
   if (status === "cooldown") return "Cooling down";
@@ -77,7 +44,7 @@ function statusLabel(status: KeyStatus) {
   return "Waiting for first request";
 }
 
-function statusColor(status: KeyStatus) {
+function statusColor(status: ProviderKeyStatus) {
   if (status === "active" || status === "ready") return "bg-[#35a477]";
   if (status === "cooldown") return "bg-[#e49b3f]";
   if (status === "exhausted") return "bg-[#d95061] animate-pulse";
@@ -92,33 +59,49 @@ export function ProviderControl({ className = "" }: { className?: string }) {
   const [tavilyKey, setTavilyKey] = useState("");
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [now, setNow] = useState(() => Date.now());
+  const configuredKeysetRef = useRef<string | null>(null);
+  const configurationRequestRef = useRef(0);
 
   const refresh = useCallback(async () => {
+    const requestId = ++configurationRequestRef.current;
     const sessionId = window.localStorage.getItem("chalkie:session") || "home";
-    const preferred = preferredGroqKeyId();
     const params = new URLSearchParams({ sessionId });
-    if (preferred) params.set("preferredKeyId", preferred);
     const response = await fetch(`/api/byok?${params}`, { cache: "no-store" });
     if (!response.ok) return;
     const next = await response.json() as ProviderSummary;
-    if (window.localStorage.getItem(BYOK_SAVED_STORAGE) === "1" && next.source !== "byok") next.personalKeysNeedReentry = true;
-    setSummary(next);
-    publishProviderStatus(next.quota);
+    if (requestId !== configurationRequestRef.current) return;
+    const quota = sanitizeProviderQuota(next.quota);
+    if (!quota) return;
+    configuredKeysetRef.current = providerKeysetIdentity(quota);
+    setSummary(current => ({ ...next, quota: newestProviderQuota(current?.quota ?? null, quota) }));
+    window.dispatchEvent(new CustomEvent(PROVIDER_CONFIGURATION_EVENT, { detail: quota }));
+    publishProviderStatus(quota);
   }, []);
 
   useEffect(() => {
+    window.localStorage.removeItem(STATUS_STORAGE);
+    window.localStorage.removeItem(ACTIVE_KEY_STORAGE);
+    window.localStorage.removeItem(BYOK_SAVED_STORAGE);
     const refreshTimer = window.setTimeout(() => void refresh(), 0);
     const handle = (event: Event) => {
-      const quota = (event as CustomEvent<ProviderQuota>).detail;
-      if (!quota?.keys) return;
-      setSummary((current) => current ? { ...current, source: quota.source, configured: quota.keys.length > 0, quota } : { configured: quota.keys.length > 0, source: quota.source, tavilyConfigured: false, encryptionReady: true, personalKeysNeedReentry: false, quota });
+      const quota = sanitizeProviderQuota((event as CustomEvent<ProviderQuota>).detail);
+      if (!quota || !quotaMatchesConfiguration(configuredKeysetRef.current, quota)) return;
+      setSummary((current) => current ? { ...current, source: quota.source, configured: quota.keys.length > 0, quota: newestProviderQuota(current.quota, quota) } : { configured: quota.keys.length > 0, source: quota.source, tavilyConfigured: false, encryptionReady: true, personalKeysNeedReentry: false, quota });
     };
-    window.addEventListener(STATUS_EVENT, handle);
+    window.addEventListener(PROVIDER_STATUS_EVENT, handle);
     return () => {
       window.clearTimeout(refreshTimer);
-      window.removeEventListener(STATUS_EVENT, handle);
+      window.removeEventListener(PROVIDER_STATUS_EVENT, handle);
     };
   }, [refresh]);
+
+  useEffect(() => {
+    if (!open && !summary?.quota.allUnavailable) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, [open, summary?.quota.allUnavailable]);
+  const retryView = providerRetryView(null, summary?.quota ?? null, now);
 
   const active = useMemo(() => summary?.quota.keys.find((key) => key.id === summary.quota.activeKeyId)
     ?? summary?.quota.keys.find((key) => !["invalid", "exhausted", "cooldown"].includes(key.status))
@@ -129,7 +112,7 @@ export function ProviderControl({ className = "" }: { className?: string }) {
     : !summary?.configured
     ? "Add API keys"
     : summary.quota.allUnavailable
-      ? "FREE limit reached"
+      ? (retryView.needsKeys ? "Check API keys" : "Provider unavailable")
       : active?.remainingRequests !== undefined
         ? `${activeKeyLabel} ${active.slot} · ${shortNumber(active.remainingRequests)} req`
         : `${activeKeyLabel} ${active?.slot ?? 1} ready`;
@@ -146,7 +129,6 @@ export function ProviderControl({ className = "" }: { className?: string }) {
       });
       const data = await response.json() as { error?: string; savedGroqKeys?: number };
       if (!response.ok) throw new Error(data.error || "Could not save provider keys");
-      window.localStorage.setItem(BYOK_SAVED_STORAGE, "1");
       setKeys(["", "", ""]);
       setTavilyKey("");
       setMessage(`${data.savedGroqKeys ?? 0} Groq key${data.savedGroqKeys === 1 ? "" : "s"} saved securely`);
@@ -208,7 +190,7 @@ export function ProviderControl({ className = "" }: { className?: string }) {
           <div className="flex max-h-[92vh] w-[min(680px,96vw)] flex-col overflow-hidden rounded-[24px] border border-[#222636] bg-[#0e1017] text-[#f3f4f6] shadow-2xl">
             <div className="flex shrink-0 items-center gap-3 border-b border-[#1f2333] px-5 py-4">
               <span className="grid h-10 w-10 place-items-center rounded-[13px] bg-[#201d36] text-[#818cf8]"><KeyRound size={18} /></span>
-              <div><h2 id="provider-title" className="font-semibold tracking-[-.02em] text-[#f3f4f6]">AI provider keys</h2><p className="mt-0.5 text-xs text-[#9ca3af]">Sticky key usage with automatic failover</p></div>
+              <div><h2 id="provider-title" className="font-semibold tracking-[-.02em] text-[#f3f4f6]">AI provider keys</h2><p className="mt-0.5 text-xs text-[#9ca3af]">Up to three Groq keys, tried in queue order</p></div>
               <button type="button" onClick={() => setOpen(false)} className="ml-auto grid h-9 w-9 place-items-center rounded-full border border-[#222636] text-[#9ca3af] transition hover:bg-[#1a1d2b] hover:text-[#f3f4f6]" aria-label="Close API key settings"><X size={16} /></button>
             </div>
 
@@ -218,17 +200,17 @@ export function ProviderControl({ className = "" }: { className?: string }) {
                 <p className="mt-1.5 text-xs leading-5 text-[#86efac]">Keys are encrypted into an HttpOnly, same-site cookie. Canvas code and local storage never receive them after submission. They are sent only from the backend to Groq or Tavily.</p>
               </div>
 
-              {summary?.personalKeysNeedReentry && <div className="mt-3 flex items-start gap-2 rounded-2xl border border-[#5c3018] bg-[#24130a] p-4 text-[#fdba74]"><AlertCircle className="mt-0.5 shrink-0" size={16} /><div><p className="text-sm font-semibold">Re-enter your personal keys once</p><p className="mt-1 text-xs leading-5">The saved cookie was created with a previous local encryption secret and can no longer be opened. Paste the keys again below; future server restarts will remember them.</p></div></div>}
+              {summary?.personalKeysNeedReentry && <div className="mt-3 flex items-start gap-2 rounded-2xl border border-[#5c3018] bg-[#24130a] p-4 text-[#fdba74]"><AlertCircle className="mt-0.5 shrink-0" size={16} /><div><p className="text-sm font-semibold">Re-enter your personal keys</p><p className="mt-1 text-xs leading-5">The saved keys could not be decrypted. Paste them again below to update the secure cookie.</p></div></div>}
 
               <section className="mt-5" aria-labelledby="quota-heading">
                 <div className="flex items-center justify-between"><h3 id="quota-heading" className="text-sm font-semibold text-[#f3f4f6]">Live Groq status</h3><span className="rounded-full bg-[#181a26] px-2.5 py-1 text-[11px] font-semibold text-[#9ca3af]">{summary?.source === "byok" ? "Personal keys" : summary?.source === "server" ? "Server keys" : "No keys"}</span></div>
                 <div className="mt-2 grid gap-2 sm:grid-cols-3">
-                  {(summary?.quota.keys ?? []).map((key, index) => (
+                  {(summary?.quota.keys ?? []).map((key) => (
                     <div key={key.id} className={`rounded-xl border p-3 ${key.id === summary?.quota.activeKeyId ? "border-[#4f46e5] bg-[#161528]" : "border-[#222636] bg-[#12141e]"}`}>
                       <div className="flex items-center gap-2"><span className={`h-2 w-2 rounded-full ${statusColor(key.status)}`} /><span className="text-xs font-semibold text-[#f3f4f6]">Key {key.slot}</span>{key.queuePosition !== undefined && <span className="ml-auto rounded-full bg-[#25203e] px-1.5 py-0.5 text-[9px] font-bold text-[#a5b4fc]">Q{key.queuePosition}</span>}<span className="font-mono text-[10px] text-[#6b7280]">{key.masked}</span></div>
                       <p className="mt-2 text-[11px] font-medium text-[#d1d5db]">{statusLabel(key.status)}</p>
-                      <p className="mt-1 text-[11px] leading-4 text-[#9ca3af]">{key.remainingDailyTokens !== undefined ? `${key.remainingDailyTokens.toLocaleString()} daily tokens remain` : key.remainingRequests !== undefined ? `${key.remainingRequests.toLocaleString()} requests left today` : "Daily requests update after use"}</p>
-                      <p className="text-[11px] leading-4 text-[#9ca3af]">{key.retryAt && ["cooldown", "exhausted"].includes(key.status) ? `Retry after ${new Date(key.retryAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : key.remainingTokens !== undefined ? `${key.remainingTokens.toLocaleString()} tokens left this minute` : "Minute tokens update after use"}</p>
+                      <p className="mt-1 text-[11px] leading-4 text-[#9ca3af]">{key.remainingDailyTokens !== undefined ? `${key.remainingDailyTokens.toLocaleString()} daily tokens remain` : key.remainingRequests !== undefined ? `${key.remainingRequests.toLocaleString()} requests remain in the reported window` : "Request limits update after use"}</p>
+                      <p className="text-[11px] leading-4 text-[#9ca3af]">{key.retryAt && ["cooldown", "exhausted"].includes(key.status) ? (retryCountdown(key.retryAt, now) ? `Retry window in ${retryCountdown(key.retryAt, now)}` : "Ready to check again") : key.remainingTokens !== undefined ? `${key.remainingTokens.toLocaleString()} tokens remain in the reported window` : "Token limits update after use"}</p>
                       {key.consecutiveFailures !== undefined && key.consecutiveFailures > 0 && <p className="mt-1 text-[10px] font-medium text-[#f87171]">{key.consecutiveFailures} consecutive failure{key.consecutiveFailures === 1 ? "" : "s"}</p>}
                     </div>
                   ))}
@@ -239,23 +221,20 @@ export function ProviderControl({ className = "" }: { className?: string }) {
                   <div className="mt-3 flex items-start gap-2 rounded-2xl border border-[#5c3018] bg-[#24130a] p-3 text-[#fdba74]">
                     <AlertCircle className="mt-0.5 shrink-0" size={15} />
                     <div>
-                      <p className="text-xs font-semibold">All keys are currently unavailable</p>
+                      <p className="text-xs font-semibold">{retryView.title}</p>
                       <p className="mt-0.5 text-[11px] leading-4 text-[#ea580c]">
-                        {((summary.quota as ProviderQuotaWithDegradation).degradationReason === "all_keys_invalid")
-                          ? "Please check and re-enter your API keys below."
-                          : (summary.quota as ProviderQuotaWithDegradation).nextRetryAt
-                            ? `The earliest key will recover at ${new Date((summary.quota as ProviderQuotaWithDegradation).nextRetryAt!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`
-                            : "Add another Groq key or wait for a cooldown reset."}
+                        {retryView.detail}
                       </p>
                     </div>
                   </div>
                 )}
-                <p className="mt-2 text-[11px] leading-4 text-[#6b7280]">Groq exposes daily request and per-minute token headers. It does not expose a general free-credit balance on successful requests.</p>
+                <p className="mt-2 text-[11px] leading-4 text-[#6b7280]">Usage and retry times come from Groq. A retry time permits another attempt; it does not guarantee that quota has replenished.</p>
               </section>
 
               <form onSubmit={save} className="mt-5 border-t border-[#1f2333] pt-5">
                 <div className="flex items-center justify-between"><h3 className="text-sm font-semibold text-[#f3f4f6]">Bring your own keys</h3><span className={`text-xs font-medium ${summary?.tavilyConfigured ? "text-[#34d399]" : "text-[#6b7280]"}`}>Tavily {summary?.tavilyConfigured ? "ready" : "not configured"}</span></div>
                 <p className="mt-1 text-xs leading-5 text-[#9ca3af]">The first Groq key stays active. A rate-limited or invalid key moves to the back and the next key is tried immediately.</p>
+                <p className="mt-1 text-xs leading-5 text-[#9ca3af]">To replace Groq keys, enter the complete list in the order you want. Leave all Groq fields blank to keep saved keys while updating Tavily.</p>
                 <div className="mt-3 space-y-2">
                   {keys.map((key, index) => (
                     <label key={index} className="block">
@@ -273,7 +252,7 @@ export function ProviderControl({ className = "" }: { className?: string }) {
 
                 <div className="mt-4 flex flex-wrap items-center gap-2">
                   <button type="submit" disabled={saving || (!keys.some((key) => key.trim()) && !tavilyKey.trim())} className="inline-flex h-10 items-center gap-2 rounded-xl bg-[#6366f1] px-4 text-sm font-semibold text-white transition hover:bg-[#4f46e5] disabled:cursor-not-allowed disabled:opacity-40"><Save size={15} /> {saving ? "Saving…" : "Save personal keys"}</button>
-                  {summary?.source === "byok" && <button type="button" disabled={saving} onClick={() => void clearByok()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#522129] bg-[#241216] px-4 text-sm font-semibold text-[#f87171] transition hover:bg-[#33171d] disabled:opacity-40"><Trash2 size={14} /> Remove personal keys</button>}
+                  {(summary?.source === "byok" || summary?.tavilySource === "byok" || summary?.personalKeysNeedReentry) && <button type="button" disabled={saving} onClick={() => void clearByok()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#522129] bg-[#241216] px-4 text-sm font-semibold text-[#f87171] transition hover:bg-[#33171d] disabled:opacity-40"><Trash2 size={14} /> Remove personal keys</button>}
                   <button type="button" disabled={saving} onClick={() => void resetEverything()} className="inline-flex h-10 items-center gap-2 rounded-xl border border-[#262a38] bg-[#141620] px-4 text-sm font-semibold text-[#d1d5db] transition hover:bg-[#1a1d2b] disabled:opacity-40" title="Reset all keys, server caches, and local workspace"><RotateCcw size={14} /> Reset all data & cache</button>
                 </div>
               </form>

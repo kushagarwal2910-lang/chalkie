@@ -1,6 +1,5 @@
 import crypto from "node:crypto";
 import type { ResearchSource } from "@/lib/lesson-schema";
-import { rerankWithGroq } from "@/lib/groq";
 import type { GroqCallOptions } from "@/lib/groq-pool";
 import { resolveProviderCredentials } from "@/lib/provider-credentials";
 
@@ -51,7 +50,8 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(left) * Math.sqrt(right) || 1);
 }
 
-async function embeddings(input: string[]): Promise<number[][] | null> {
+async function embeddings(input: string[], signal?: AbortSignal): Promise<number[][] | null> {
+  signal?.throwIfAborted();
   const baseUrl = process.env.EMBEDDING_BASE_URL;
   const apiKey = process.env.EMBEDDING_API_KEY;
   const model = process.env.EMBEDDING_MODEL;
@@ -61,7 +61,7 @@ async function embeddings(input: string[]): Promise<number[][] | null> {
   try {
     const response = await fetch(`${baseUrl.replace(/\/$/, "")}/embeddings`, {
       method: "POST",
-      signal: controller.signal,
+      signal: signal ? AbortSignal.any([signal, controller.signal]) : controller.signal,
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
       body: JSON.stringify({ model, input }),
     });
@@ -69,6 +69,7 @@ async function embeddings(input: string[]): Promise<number[][] | null> {
     const data = (await response.json()) as { data?: Array<{ embedding: number[] }> };
     return data.data?.map((item) => item.embedding) ?? null;
   } catch {
+    signal?.throwIfAborted();
     return null;
   } finally {
     clearTimeout(timer);
@@ -79,10 +80,11 @@ function indexKey(sessionId: string) {
   return `chalkie:index:${crypto.createHash("sha256").update(sessionId).digest("hex").slice(0, 24)}`;
 }
 
-async function rankChunks(question: string, chunks: ResearchChunk[], _groqOptions: GroqCallOptions = {}): Promise<ResearchChunk[]> {
+async function rankChunks(question: string, chunks: ResearchChunk[], groqOptions: GroqCallOptions = {}): Promise<ResearchChunk[]> {
+  groqOptions.signal?.throwIfAborted();
   const rescored = chunks.map((chunk) => ({ ...chunk, lexical: lexicalScore(question, chunk.text), semantic: 0, score: 0 }));
   const candidatePool = rescored.sort((a, b) => b.lexical - a.lexical).slice(0, 30);
-  const vectors = await embeddings([question, ...candidatePool.map((chunk) => chunk.text)]);
+  const vectors = await embeddings([question, ...candidatePool.map((chunk) => chunk.text)], groqOptions.signal);
   if (vectors?.length === candidatePool.length + 1) {
     const queryVector = vectors[0];
     candidatePool.forEach((chunk, index) => { chunk.semantic = Math.max(0, cosine(queryVector, vectors[index + 1])); });
@@ -107,6 +109,7 @@ async function loadIndex(sessionId: string): Promise<ResearchIndex | null> {
 }
 
 export async function retrieveSessionContext(question: string, sessionId: string, fallbackSources: ResearchSource[] = [], groqOptions: GroqCallOptions = {}): Promise<{ sources: ResearchSource[]; context: string; indexed: boolean }> {
+  groqOptions.signal?.throwIfAborted();
   const stored = await loadIndex(sessionId);
   const fallbackChunks: ResearchChunk[] = fallbackSources.map((source, index) => ({
     id: `fallback-${index + 1}`,
@@ -129,16 +132,17 @@ export async function retrieveSessionContext(question: string, sessionId: string
 }
 
 export async function researchQuestion(question: string, sessionId: string, groqOptions: GroqCallOptions = {}): Promise<{ sources: ResearchSource[]; context: string }> {
+  groqOptions.signal?.throwIfAborted();
   const tavilyKey = (await resolveProviderCredentials()).tavilyKey;
   if (!tavilyKey) return { sources: [], context: "" };
 
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 35000);
+  const timer = setTimeout(() => controller.abort(new DOMException("Research request timed out", "TimeoutError")), 35000);
   let results: TavilyResult[] = [];
   try {
     const response = await fetch("https://api.tavily.com/search", {
       method: "POST",
-      signal: controller.signal,
+      signal: groqOptions.signal ? AbortSignal.any([groqOptions.signal, controller.signal]) : controller.signal,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ api_key: tavilyKey, query: question, max_results: 20, search_depth: "advanced", include_raw_content: "markdown", include_answer: false }),
     });

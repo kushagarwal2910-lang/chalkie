@@ -6,11 +6,11 @@ import {
   type FollowUpPlan,
   type LessonPlan,
   type ResearchSource,
-  type VisualObject,
 } from "./lesson-schema";
 import { repairAndValidateLessonPlan, BACKDROP_ROLES } from "./lesson-layout";
 import { applyElkLayout } from "./elk-spatial-layout";
 import { groqFetch, GroqHttpError, type GroqCallOptions } from "./groq-pool";
+import { ProviderResponseError } from "./provider-response";
 
 export const GROQ_MODEL = "openai/gpt-oss-120b";
 
@@ -33,7 +33,7 @@ async function groqRequest<T>(path: string, init: RequestInit, options: GroqCall
   }
 }
 
-function cleanAndParseJson(raw: string): any {
+function cleanAndParseJson(raw: string): unknown {
   let cleaned = raw.trim();
   if (cleaned.startsWith("```")) {
     cleaned = cleaned.replace(/^```(?:json)?\s*\n?/, "").replace(/\n?```\s*$/, "").trim();
@@ -247,6 +247,7 @@ TEACHING SEGMENTS & STRICT AUDIO-VISUAL SYNCHRONIZATION:
 
   let lastError: unknown;
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    options.signal?.throwIfAborted();
     const result = await groqRequest<{ choices: Array<{ message: { content: string } }> }>("/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -260,7 +261,7 @@ TEACHING SEGMENTS & STRICT AUDIO-VISUAL SYNCHRONIZATION:
       }),
     }, options);
 
-    const raw = result.choices[0]?.message.content;
+    const raw = result?.choices?.[0]?.message?.content;
     if (!raw) {
       lastError = new Error("Groq returned an empty lesson");
       continue;
@@ -275,7 +276,7 @@ TEACHING SEGMENTS & STRICT AUDIO-VISUAL SYNCHRONIZATION:
     }
   }
   console.error("[chalkie] invalid scene graph", lastError);
-  throw new Error("The visual plan was incomplete. Please try the question again.");
+  throw new ProviderResponseError("The visual plan was incomplete. Please try the question again.");
 }
 
 export async function createFollowUpWithGroq(question: string, context: string, sources: ResearchSource[], currentLesson: LessonPlan, options: GroqCallOptions = {}): Promise<FollowUpPlan> {
@@ -321,6 +322,7 @@ Create 1-4 concise narration segments in teacherly causal order. The answer fiel
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
+    options.signal?.throwIfAborted();
     const result = await groqRequest<{ choices: Array<{ message: { content: string } }> }>("/chat/completions", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -337,7 +339,7 @@ Create 1-4 concise narration segments in teacherly causal order. The answer fiel
       }),
     }, options);
 
-    const raw = result.choices[0]?.message.content;
+    const raw = result?.choices?.[0]?.message?.content;
     if (!raw) {
       lastError = new Error("Groq returned an empty follow-up");
       continue;
@@ -398,7 +400,7 @@ Create 1-4 concise narration segments in teacherly causal order. The answer fiel
     }
   }
   console.error("[chalkie] invalid follow-up plan", lastError);
-  throw new Error("The follow-up explanation was incomplete. Please ask again.");
+  throw new ProviderResponseError("The follow-up explanation was incomplete. Please ask again.");
 }
 
 export async function rerankWithGroq(question: string, candidates: Array<{ id: string; title: string; text: string }>, options: GroqCallOptions = {}): Promise<string[]> {

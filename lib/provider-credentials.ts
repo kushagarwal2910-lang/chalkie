@@ -94,7 +94,11 @@ export function decryptProviderCredentials(value: string): StoredProviderCredent
   const decipher = crypto.createDecipheriv("aes-256-gcm", encryptionKey(), data.subarray(0, 12));
   decipher.setAuthTag(data.subarray(12, 28));
   const parsed = JSON.parse(Buffer.concat([decipher.update(data.subarray(28)), decipher.final()]).toString("utf8")) as StoredProviderCredentials;
-  if (parsed.version !== 1 || !Array.isArray(parsed.groqKeys)) throw new Error("Unsupported provider credential cookie");
+  if (parsed.version !== 1 || !Array.isArray(parsed.groqKeys) || parsed.groqKeys.length > 3
+    || parsed.groqKeys.some((key) => typeof key !== "string" || key.length > 180)
+    || (parsed.tavilyKey !== undefined && (typeof parsed.tavilyKey !== "string" || parsed.tavilyKey.length > 220))) {
+    throw new Error("Unsupported provider credential cookie");
+  }
   return parsed;
 }
 

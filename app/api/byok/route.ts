@@ -1,5 +1,5 @@
 import { cookies } from "next/headers";
-import { NextRequest } from "next/server";
+import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { getGroqQuotaSnapshot } from "@/lib/groq-pool";
 import { BYOK_COOKIE, byokEncryptionConfigured, encryptProviderCredentials, readByokCookie, resolveProviderCredentials } from "@/lib/provider-credentials";
@@ -24,16 +24,16 @@ function sameOrigin(request: NextRequest) {
 
 export async function GET(request: NextRequest) {
   const hasPersonalKeyCookie = Boolean((await cookies()).get(BYOK_COOKIE)?.value);
+  const savedCredentials = await readByokCookie();
   const credentials = await resolveProviderCredentials();
-  const preferredKeyId = request.nextUrl.searchParams.get("preferredKeyId") || undefined;
-  const quota = await getGroqQuotaSnapshot(request.nextUrl.searchParams.get("sessionId") || undefined, preferredKeyId);
+  const quota = await getGroqQuotaSnapshot(request.nextUrl.searchParams.get("sessionId") || undefined);
   return Response.json({
     configured: credentials.groqKeys.length > 0,
     source: credentials.source,
     tavilyConfigured: Boolean(credentials.tavilyKey),
     tavilySource: credentials.tavilySource,
     encryptionReady: byokEncryptionConfigured(),
-    personalKeysNeedReentry: hasPersonalKeyCookie && credentials.source !== "byok",
+    personalKeysNeedReentry: hasPersonalKeyCookie && !savedCredentials,
     quota,
   }, { headers: { "Cache-Control": "no-store" } });
 }
