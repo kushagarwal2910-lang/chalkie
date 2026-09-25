@@ -8,7 +8,7 @@ import {
   type ResearchSource,
   type VisualObject,
 } from "./lesson-schema";
-import { normalizeLessonLayout, repairAndValidateLessonPlan, BACKDROP_ROLES } from "./lesson-layout";
+import { repairAndValidateLessonPlan, BACKDROP_ROLES } from "./lesson-layout";
 import { applyElkLayout } from "./elk-spatial-layout";
 import { groqFetch, GroqHttpError, type GroqCallOptions } from "./groq-pool";
 
@@ -268,9 +268,7 @@ TEACHING SEGMENTS & STRICT AUDIO-VISUAL SYNCHRONIZATION:
     try {
       const json = cleanAndParseJson(raw);
       const parsed = lessonPlanSchema.parse(json);
-      const repaired = repairAndValidateLessonPlan(parsed);
-      const normalized = normalizeLessonLayout(repaired);
-      return await applyElkLayout(normalized);
+      return await applyElkLayout(parsed);
     } catch (error) {
       lastError = error;
       console.warn(`[chalkie] invalid scene graph attempt ${attempt + 1}`, error);

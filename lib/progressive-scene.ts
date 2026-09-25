@@ -25,6 +25,15 @@ export function getProgressiveVisibleObjects(
     }
   }
 
+  // A teaching step can target a connection itself. Its two endpoints must be
+  // present too, otherwise a valid narrated link disappears from the scene.
+  for (const connection of lesson.connections) {
+    if (cumulativeTargets.has(connection.id)) {
+      cumulativeTargets.add(connection.from);
+      cumulativeTargets.add(connection.to);
+    }
+  }
+
   const visible = lesson.objects.filter((obj) => {
     // Structural backdrops or frame containers remain visible
     if (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame") return true;

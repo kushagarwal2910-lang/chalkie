@@ -1,0 +1,337 @@
+{
+  "id": "scene1",
+  "title": "Thermostat Negative Feedback Loop",
+  "question": "Explain how a thermostat uses negative feedback: target temperature, comparator, controller, heater, room temperature, and sensor. Show the forward chain and the sensor feedback loop returning to the comparator, with an external cold-air disturbance entering the room. Label the separate arrows.",
+  "summary": "A thermostat maintains a setpoint by comparing the target temperature with the sensed room temperature, adjusting heater power, and correcting for disturbances via negative feedback.",
+  "diagramType": "system",
+  "visualStrategy": "Show physical components and arrows with one‑word labels, progressing through the feedback chain.",
+  "sources": [],
+  "objects": [
+    {
+      "id": "obj_room",
+      "role": "environment",
+      "shapeType": "custom",
+      "label": "Room",
+      "labelPlacement": "below",
+      "x": 230,
+      "y": 264,
+      "width": 276,
+      "height": 163,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 124,
+          "height": 86,
+          "data": "",
+          "text": "Air",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_target",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "Target Temp",
+      "labelPlacement": "above",
+      "x": 587,
+      "y": 403,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 36,
+          "data": "",
+          "text": "Setpoint",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_comparator",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "Comparator",
+      "labelPlacement": "above",
+      "x": 768,
+      "y": 334,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 49,
+          "data": "",
+          "text": "Diff",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_controller",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "Controller",
+      "labelPlacement": "above",
+      "x": 950,
+      "y": 325,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 49,
+          "data": "",
+          "text": "PID",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_heater",
+      "role": "output",
+      "shapeType": "custom",
+      "label": "Heater",
+      "labelPlacement": "below",
+      "x": 1132,
+      "y": 300,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 49,
+          "data": "",
+          "text": "Heat",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_sensor",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "Sensor",
+      "labelPlacement": "above",
+      "x": 587,
+      "y": 325,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 49,
+          "data": "",
+          "text": "Temp",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "obj_disturb",
+      "role": "force",
+      "shapeType": "custom",
+      "label": "Cold Air",
+      "labelPlacement": "above",
+      "x": 48,
+      "y": 318,
+      "width": 100,
+      "height": 53,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 74,
+          "height": 49,
+          "data": "",
+          "text": "Disturb",
+          "fill": "none",
+          "stroke": "ink",
+          "strokeWidth": 1.3,
+          "opacity": 1
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "link-link-c1",
+      "from": "obj_target",
+      "to": "obj_comparator",
+      "label": "set",
+      "color": "cyan",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c2",
+      "from": "obj_room",
+      "to": "obj_sensor",
+      "label": "temp",
+      "color": "blue",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c3",
+      "from": "obj_sensor",
+      "to": "obj_comparator",
+      "label": "feedback",
+      "color": "green",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c4",
+      "from": "obj_comparator",
+      "to": "obj_controller",
+      "label": "error",
+      "color": "slate",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c5",
+      "from": "obj_controller",
+      "to": "obj_heater",
+      "label": "signal",
+      "color": "red",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c6",
+      "from": "obj_heater",
+      "to": "obj_room",
+      "label": "heat",
+      "color": "orange",
+      "route": "curve",
+      "fromAnchor": "left",
+      "toAnchor": "right",
+      "arrowhead": "arrow",
+      "bend": 56
+    },
+    {
+      "id": "link-link-c7",
+      "from": "obj_disturb",
+      "to": "obj_room",
+      "label": "cold",
+      "color": "blue",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    }
+  ],
+  "segments": [
+    {
+      "id": "seg1",
+      "title": "Setpoint and Comparison",
+      "narration": "First we set the desired temperature – the target temperature – and feed it into the comparator where it meets the sensed room temperature.",
+      "targetIds": [
+        "obj_target",
+        "obj_comparator"
+      ],
+      "action": "reveal",
+      "durationMs": 8000
+    },
+    {
+      "id": "seg2",
+      "title": "Controller to Heater",
+      "narration": "The comparator outputs an error signal to the controller, which decides how much power to send to the heater.",
+      "targetIds": [
+        "obj_controller",
+        "obj_heater"
+      ],
+      "action": "focus",
+      "durationMs": 7000
+    },
+    {
+      "id": "seg3",
+      "title": "Heating the Room",
+      "narration": "The heater injects warm air into the room, raising the room temperature.",
+      "targetIds": [
+        "obj_heater",
+        "obj_room"
+      ],
+      "action": "pulse",
+      "durationMs": 6000
+    },
+    {
+      "id": "seg4",
+      "title": "Sensor Feedback Loop",
+      "narration": "A sensor measures the new room temperature and sends that feedback back to the comparator, closing the negative‑feedback loop.",
+      "targetIds": [
+        "obj_sensor",
+        "obj_comparator"
+      ],
+      "action": "trace",
+      "durationMs": 9000
+    },
+    {
+      "id": "seg5",
+      "title": "Cold‑Air Disturbance",
+      "narration": "If a cold‑air draft enters the room, the sensor detects a drop, the comparator sees a larger error, and the controller ramps up the heater to compensate.",
+      "targetIds": [
+        "obj_disturb",
+        "obj_room",
+        "obj_sensor"
+      ],
+      "action": "flow",
+      "durationMs": 10000
+    }
+  ]
+}

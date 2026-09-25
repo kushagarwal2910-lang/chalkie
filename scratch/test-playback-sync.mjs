@@ -133,6 +133,7 @@ test('progressive visibility stages nothing before speech and never reveals the 
       { id: 'current', label: 'Current', role: 'component' },
       { id: 'extra', label: '', role: 'component' },
     ],
+    connections: [],
     segments: [{ targetIds: ['junction#0'] }, { targetIds: ['current'] }],
   };
   const ids = (step, presenting = true) => getProgressiveVisibleObjects(plan, step, presenting).map(o => o.id);
@@ -140,4 +141,19 @@ test('progressive visibility stages nothing before speech and never reveals the 
   assert.deepEqual(ids(0), ['junction']);
   assert.deepEqual(ids(1), ['junction', 'current']);
   assert.deepEqual(ids(1, false), ['junction', 'current', 'extra']);
+});
+
+test('a connection-only teaching step reveals both endpoints without unrelated objects', () => {
+  const plan = {
+    objects: [
+      { id: 'source', label: 'Source', role: 'component' },
+      { id: 'destination', label: 'Destination', role: 'component' },
+      { id: 'unrelated', label: 'Unrelated', role: 'component' },
+    ],
+    connections: [{ id: 'transfer', from: 'source', to: 'destination' }],
+    segments: [{ targetIds: ['transfer'] }, { targetIds: ['unrelated'] }],
+  };
+  assert.deepEqual(getProgressiveVisibleObjects(plan, -1, true), []);
+  assert.deepEqual(getProgressiveVisibleObjects(plan, 0, true).map(o => o.id), ['source', 'destination']);
+  assert.deepEqual(getProgressiveVisibleObjects(plan, 1, true).map(o => o.id), ['source', 'destination', 'unrelated']);
 });

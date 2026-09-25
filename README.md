@@ -312,6 +312,14 @@ individual word positions in that recording are approximate. If the SDK removes
 the editor because a license is missing or expired, Chalkie stops narration and
 shows a whiteboard error.
 
+ELK lays out full-size objects on the infinite canvas and its orthogonal paths,
+ports, and label boxes are rendered directly. Nested containers, parallel edges,
+and self-loops are preserved. Moving a node reroutes its connections around the
+remaining objects. The camera fits the diagram without shrinking shape geometry.
+Network and cycle templates share coordinates between their cards and connectors.
+Dense non-planar graphs can still require edge crossings; layout minimizes them
+rather than removing meaningful connections.
+
 Chalkie includes automated verification test scripts in `scratch/`:
 
 ```bash
@@ -320,6 +328,12 @@ npm run typecheck
 
 # Regression checks for delayed canvas loading, speech timing, buffering, and cancellation
 node --experimental-strip-types --test scratch/test-playback-sync.mjs
+
+# Actual ELK pipeline, captured model responses, and dense/nested/formula stress cases
+node --experimental-strip-types --test scratch/test-spatial-regression.mjs
+
+# Interactive connector and template geometry regressions
+node --experimental-strip-types --test lib/connector-routing.test.ts scratch/test-template-geometry.mjs
 
 # Verify WCAG 2.1 AAA color contrast ratios across all chalk fills
 node scratch/test-wcag-contrast.mjs

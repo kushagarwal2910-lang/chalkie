@@ -63,6 +63,7 @@ export const visualPartSchema = z.object({
 
 export const visualObjectSchema = z.object({
   id: z.string().min(1).max(200),
+  parentId: z.string().max(200).optional(),
   role: z.preprocess((val) => {
     const s = String(val ?? "").toLowerCase();
     return visualRoles.includes(s as any) ? s : "component";
@@ -113,6 +114,12 @@ export const visualConnectionSchema = z.object({
     return connectionArrowheads.includes(s as any) ? s : "arrow";
   }, z.enum(connectionArrowheads)).default("arrow"),
   bend: z.preprocess((val) => Number(val) || 0, z.number().default(0)),
+  // Computed by the layout engine, in canvas page coordinates. These are not
+  // requested from the language model: its anchors alone cannot describe a route.
+  points: z.array(z.object({ x: z.number().finite(), y: z.number().finite() })).min(2).max(256).optional(),
+  fromPort: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  toPort: z.object({ x: z.number().finite(), y: z.number().finite() }).optional(),
+  labelPosition: z.object({ x: z.number().finite(), y: z.number().finite(), width: z.number().nonnegative(), height: z.number().nonnegative() }).optional(),
 });
 
 export const lessonSegmentSchema = z.object({

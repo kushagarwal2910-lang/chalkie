@@ -1,0 +1,516 @@
+{
+  "id": "scene-001",
+  "title": "Web Architecture with Load Balancer, App Servers, Cache, and Database",
+  "question": "Explain a web architecture where clients reach a load balancer, which branches to three application servers. Every server can read a shared cache and a shared database; the cache can miss and fall back to the database. Show the separate request, cache-hit, cache-miss and response paths clearly.",
+  "summary": "Clients contact a load balancer that distributes requests to three identical application servers. Each server first checks a shared in‑memory cache; on a hit it returns data directly, on a miss it queries the shared database and then populates the cache before responding.",
+  "diagramType": "system",
+  "visualStrategy": "Progressive construction of 5 core objects (load balancer, three app servers, shared cache, shared database) with clear connection arrows for request, cache‑hit, cache‑miss, and response flows.",
+  "sources": [],
+  "objects": [
+    {
+      "id": "cache",
+      "role": "environment",
+      "shapeType": "custom",
+      "label": "Shared Cache",
+      "labelPlacement": "right",
+      "x": 427,
+      "y": 280,
+      "width": 260,
+      "height": 154,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 73,
+          "height": 49,
+          "data": "",
+          "text": "",
+          "fill": "cyan",
+          "stroke": "ink",
+          "strokeWidth": 1.2,
+          "opacity": 0.8
+        }
+      ]
+    },
+    {
+      "id": "db",
+      "role": "environment",
+      "shapeType": "custom",
+      "label": "Shared Database",
+      "labelPlacement": "right",
+      "x": 972,
+      "y": 306,
+      "width": 260,
+      "height": 154,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 73,
+          "height": 49,
+          "data": "",
+          "text": "",
+          "fill": "orange",
+          "stroke": "ink",
+          "strokeWidth": 1.2,
+          "opacity": 0.9
+        }
+      ]
+    },
+    {
+      "id": "lb",
+      "role": "subject",
+      "shapeType": "custom",
+      "label": "Load Balancer",
+      "labelPlacement": "above",
+      "x": 48,
+      "y": 377,
+      "width": 95,
+      "height": 50,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 1,
+          "y": 1,
+          "width": 73,
+          "height": 36,
+          "data": "",
+          "text": "",
+          "fill": "gray",
+          "stroke": "ink",
+          "strokeWidth": 1.2,
+          "opacity": 1
+        }
+      ]
+    },
+    {
+      "id": "app1",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "App Server 1",
+      "labelPlacement": "below",
+      "x": 223,
+      "y": 261,
+      "width": 123,
+      "height": 78,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 6,
+          "width": 122,
+          "height": 17,
+          "fill": "slate",
+          "stroke": "ink",
+          "strokeWidth": 1,
+          "opacity": 0.9,
+          "text": "App Server 1",
+          "data": ""
+        },
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 27,
+          "width": 122,
+          "height": 52,
+          "fill": "none",
+          "stroke": "slate",
+          "strokeWidth": 1,
+          "opacity": 0.8,
+          "text": "",
+          "data": ""
+        },
+        {
+          "type": "wave",
+          "x": 14,
+          "y": 35,
+          "width": 109,
+          "height": 35,
+          "fill": "none",
+          "stroke": "cyan",
+          "strokeWidth": 1.4,
+          "opacity": 0.9,
+          "text": "COMPONENT STAGE",
+          "data": "3"
+        },
+        {
+          "type": "ellipse",
+          "x": 2,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        },
+        {
+          "type": "ellipse",
+          "x": 127,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        }
+      ]
+    },
+    {
+      "id": "app2",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "App Server 2",
+      "labelPlacement": "below",
+      "x": 223,
+      "y": 363,
+      "width": 123,
+      "height": 78,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 6,
+          "width": 122,
+          "height": 17,
+          "fill": "slate",
+          "stroke": "ink",
+          "strokeWidth": 1,
+          "opacity": 0.9,
+          "text": "App Server 2",
+          "data": ""
+        },
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 27,
+          "width": 122,
+          "height": 52,
+          "fill": "none",
+          "stroke": "slate",
+          "strokeWidth": 1,
+          "opacity": 0.8,
+          "text": "",
+          "data": ""
+        },
+        {
+          "type": "wave",
+          "x": 14,
+          "y": 35,
+          "width": 109,
+          "height": 35,
+          "fill": "none",
+          "stroke": "cyan",
+          "strokeWidth": 1.4,
+          "opacity": 0.9,
+          "text": "COMPONENT STAGE",
+          "data": "3"
+        },
+        {
+          "type": "ellipse",
+          "x": 2,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        },
+        {
+          "type": "ellipse",
+          "x": 127,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        }
+      ]
+    },
+    {
+      "id": "app3",
+      "role": "component",
+      "shapeType": "custom",
+      "label": "App Server 3",
+      "labelPlacement": "below",
+      "x": 768,
+      "y": 344,
+      "width": 123,
+      "height": 78,
+      "parts": [
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 6,
+          "width": 122,
+          "height": 17,
+          "fill": "slate",
+          "stroke": "ink",
+          "strokeWidth": 1,
+          "opacity": 0.9,
+          "text": "App Server 3",
+          "data": ""
+        },
+        {
+          "type": "rect",
+          "x": 6,
+          "y": 27,
+          "width": 122,
+          "height": 52,
+          "fill": "none",
+          "stroke": "slate",
+          "strokeWidth": 1,
+          "opacity": 0.8,
+          "text": "",
+          "data": ""
+        },
+        {
+          "type": "wave",
+          "x": 14,
+          "y": 35,
+          "width": 109,
+          "height": 35,
+          "fill": "none",
+          "stroke": "cyan",
+          "strokeWidth": 1.4,
+          "opacity": 0.9,
+          "text": "COMPONENT STAGE",
+          "data": "3"
+        },
+        {
+          "type": "ellipse",
+          "x": 2,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        },
+        {
+          "type": "ellipse",
+          "x": 127,
+          "y": 40,
+          "width": 7,
+          "height": 7,
+          "fill": "cyan",
+          "stroke": "white",
+          "strokeWidth": 1,
+          "opacity": 1,
+          "text": "",
+          "data": "point"
+        }
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "link-link-c1",
+      "from": "lb",
+      "to": "app1",
+      "label": "request",
+      "color": "blue",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c2",
+      "from": "lb",
+      "to": "app2",
+      "label": "request",
+      "color": "blue",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c3",
+      "from": "lb",
+      "to": "app3",
+      "label": "request",
+      "color": "blue",
+      "route": "curve",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": -56
+    },
+    {
+      "id": "link-link-c4",
+      "from": "app1",
+      "to": "cache",
+      "label": "hit",
+      "color": "green",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c5",
+      "from": "app2",
+      "to": "cache",
+      "label": "hit",
+      "color": "green",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c6",
+      "from": "app3",
+      "to": "cache",
+      "label": "hit",
+      "color": "green",
+      "route": "elbow",
+      "fromAnchor": "left",
+      "toAnchor": "right",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c7",
+      "from": "app1",
+      "to": "db",
+      "label": "miss",
+      "color": "red",
+      "route": "curve",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": -56
+    },
+    {
+      "id": "link-link-c8",
+      "from": "app2",
+      "to": "db",
+      "label": "miss",
+      "color": "red",
+      "route": "curve",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 56
+    },
+    {
+      "id": "link-link-c9",
+      "from": "app3",
+      "to": "db",
+      "label": "miss",
+      "color": "red",
+      "route": "curve",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 30
+    },
+    {
+      "id": "link-link-c10",
+      "from": "cache",
+      "to": "app1",
+      "label": "response",
+      "color": "cyan",
+      "route": "elbow",
+      "fromAnchor": "left",
+      "toAnchor": "right",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c11",
+      "from": "cache",
+      "to": "app2",
+      "label": "response",
+      "color": "cyan",
+      "route": "elbow",
+      "fromAnchor": "left",
+      "toAnchor": "right",
+      "arrowhead": "arrow",
+      "bend": 0
+    },
+    {
+      "id": "link-link-c12",
+      "from": "cache",
+      "to": "app3",
+      "label": "response",
+      "color": "cyan",
+      "route": "elbow",
+      "fromAnchor": "right",
+      "toAnchor": "left",
+      "arrowhead": "arrow",
+      "bend": 0
+    }
+  ],
+  "segments": [
+    {
+      "id": "seg1",
+      "title": "Client Request Distribution",
+      "narration": "Clients send HTTP requests to the Load Balancer, which instantly forwards each request to one of the three App Servers based on its routing algorithm.",
+      "targetIds": [
+        "lb",
+        "app1",
+        "app2",
+        "app3"
+      ],
+      "action": "reveal",
+      "durationMs": 8000
+    },
+    {
+      "id": "seg2",
+      "title": "Cache Hit Path",
+      "narration": "When an App Server receives a request, it first checks the Shared Cache. If the needed data is already cached, the server reads it and sends the response straight back to the client.",
+      "targetIds": [
+        "app1",
+        "cache"
+      ],
+      "action": "focus",
+      "durationMs": 9000
+    },
+    {
+      "id": "seg3",
+      "title": "Cache Miss Path",
+      "narration": "If the cache does not contain the requested item, the App Server experiences a cache miss, queries the Shared Database, retrieves the data, and then populates the cache for future hits.",
+      "targetIds": [
+        "app2",
+        "db"
+      ],
+      "action": "trace",
+      "durationMs": 10000
+    },
+    {
+      "id": "seg4",
+      "title": "Response Delivery",
+      "narration": "After either a cache hit or a database fetch, the App Server returns the data to the client, completing the request‑response cycle.",
+      "targetIds": [
+        "app3"
+      ],
+      "action": "pulse",
+      "durationMs": 7000
+    }
+  ]
+}

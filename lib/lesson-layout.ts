@@ -1,12 +1,7 @@
 import type { LessonPlan, VisualObject, VisualPart } from "./lesson-schema";
 import { formatMathFormula } from "./math-formatter.ts";
+import { getVisualFootprint } from "./visual-footprint.ts";
 
-const CANVAS_WIDTH = 1280;
-const CANVAS_HEIGHT = 720;
-const GAP = 36;
-const EDGE = 48;
-const USABLE_W = CANVAS_WIDTH - 2 * EDGE;
-const USABLE_H = CANVAS_HEIGHT - 2 * EDGE;
 export const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
 
 type Bounds = { minX: number; minY: number; maxX: number; maxY: number };
@@ -62,45 +57,6 @@ function axisPlotBounds(part: VisualPart, fallback: Bounds): Bounds {
   const top = clamp(part.y + 20, fallback.minY, fallback.maxY);
   const bottom = clamp(part.y + part.height - 40, top + 20, fallback.maxY);
   return { minX: left, minY: top, maxX: right, maxY: bottom };
-}
-
-function arePartsInAbsoluteCoords(parts: VisualPart[], objX: number, objY: number, objW: number, objH: number): boolean {
-  if (objX < 40 && objY < 40) return false;
-  if (!parts.length) return false;
-  let matches = 0;
-  for (const p of parts) {
-    const xMatch = objX > 40 ? (p.x >= objX - 10 && p.x <= objX + objW * 1.5) : true;
-    const yMatch = objY > 40 ? (p.y >= objY - 10 && p.y <= objY + objH * 1.5) : true;
-    if (xMatch && yMatch) matches++;
-  }
-  return matches >= Math.ceil(parts.length * 0.7);
-}
-
-function normalizePartCoordinates(part: VisualPart, objX: number, objY: number, objW: number, objH: number, isAbsolute: boolean): VisualPart {
-  let { x, y, width, height, data } = part;
-  if (isAbsolute) {
-    if (objX > 0 && x >= objX - 10 && x <= objX + objW * 1.5) {
-      x -= objX;
-    }
-    if (objY > 0 && y >= objY - 10 && y <= objY + objH * 1.5) {
-      y -= objY;
-    }
-    if ((part.type === "polygon" || part.type === "polyline") && data) {
-      const coords = data.trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
-      if (coords.length >= 2) {
-        const avgX = coords.filter((_, i) => i % 2 === 0).reduce((s, v) => s + v, 0) / (coords.length / 2);
-        const avgY = coords.filter((_, i) => i % 2 === 1).reduce((s, v) => s + v, 0) / (coords.length / 2);
-        if (objX > 0 && avgX >= objX - 10 && avgX <= objX + objW + 50 && objY > 0 && avgY >= objY - 10 && avgY <= objY + objH + 50) {
-          const adjusted: string[] = [];
-          for (let i = 0; i < coords.length; i += 2) {
-            adjusted.push(`${coords[i] - objX},${coords[i + 1] - objY}`);
-          }
-          data = adjusted.join(" ");
-        }
-      }
-    }
-  }
-  return { ...part, x, y, width, height, data };
 }
 
 function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
@@ -170,7 +126,7 @@ function sanitizeTextPart(part: VisualPart, bounds: Bounds, occupied: TextBox[])
   return chosen;
 }
 
-function sanitizeParts(parts: VisualPart[], objectWidth: number, objectHeight: number, objectX = 0, objectY = 0, role = "") {
+function sanitizeParts(parts: VisualPart[], objectWidth: number, objectHeight: number, role = "") {
   const isFormula = role === "formula";
   const objectBounds = {
     minX: isFormula ? 16 : 2,
@@ -178,84 +134,16 @@ function sanitizeParts(parts: VisualPart[], objectWidth: number, objectHeight: n
     maxX: Math.max(2, objectWidth - (isFormula ? 16 : 2)),
     maxY: Math.max(2, objectHeight - (isFormula ? 10 : 2)),
   };
-  const isAbsolute = arePartsInAbsoluteCoords(parts, objectX, objectY, objectWidth, objectHeight);
   const rawAxes = parts.find((part) => part.type === "axes");
-  const axes = rawAxes ? sanitizePart(normalizePartCoordinates(rawAxes, objectX, objectY, objectWidth, objectHeight, isAbsolute), objectBounds) : null;
+  const axes = rawAxes ? sanitizePart(rawAxes, objectBounds) : null;
   const plotBounds = axes ? axisPlotBounds(axes, objectBounds) : objectBounds;
   const occupied: TextBox[] = [];
 
-  return parts.map((rawPart) => {
-    const part = normalizePartCoordinates(rawPart, objectX, objectY, objectWidth, objectHeight, isAbsolute);
+  return parts.map((part) => {
     if (part.type === "axes" && axes) return axes;
     if (part.type === "text") return sanitizeTextPart(part, axes ? plotBounds : objectBounds, occupied);
     return sanitizePart(part, axes ? plotBounds : objectBounds);
   });
-}
-
-function overlaps(a: VisualObject, b: VisualObject, gap = GAP): boolean {
-  return a.x < b.x + b.width + gap
-    && a.x + a.width + gap > b.x
-    && a.y < b.y + b.height + gap
-    && a.y + a.height + gap > b.y;
-}
-
-function resolveCollision(
-  a: VisualObject,
-  b: VisualObject,
-  aToB: boolean,
-  bToA: boolean,
-  gap = GAP
-) {
-  const isConnected = aToB || bToA;
-  if (isConnected) {
-    const src = aToB ? a : b;
-    const dst = aToB ? b : a;
-    const isVertical = Math.abs(dst.y - src.y) > Math.abs(dst.x - src.x);
-
-    if (isVertical) {
-      if (dst.y >= src.y) {
-        dst.y = src.y + src.height + gap;
-        if (Math.abs(dst.x - src.x) < 60) {
-          dst.x = src.x + (src.width - dst.width) / 2;
-        }
-      } else {
-        dst.y = src.y - dst.height - gap;
-        if (Math.abs(dst.x - src.x) < 60) {
-          dst.x = src.x + (src.width - dst.width) / 2;
-        }
-      }
-      return;
-    }
-
-    // Horizontal connection: push destination downstream of source
-    if (dst.x >= src.x) {
-      dst.x = src.x + src.width + gap;
-      if (Math.abs(dst.y - src.y) < 60) {
-        dst.y = src.y + (src.height - dst.height) / 2;
-      }
-    } else {
-      src.x = dst.x + dst.width + gap;
-    }
-    return;
-  }
-
-  // Non-connected collision: resolve along axis of least overlap
-  const ox = Math.min(a.x + a.width + gap, b.x + b.width + gap) - Math.max(a.x, b.x);
-  const oy = Math.min(a.y + a.height + gap, b.y + b.height + gap) - Math.max(a.y, b.y);
-
-  if (ox <= oy) {
-    if (b.x >= a.x) {
-      b.x = a.x + a.width + gap;
-    } else {
-      a.x = b.x + b.width + gap;
-    }
-  } else {
-    if (b.y >= a.y) {
-      b.y = a.y + a.height + gap;
-    } else {
-      a.y = b.y + b.height + gap;
-    }
-  }
 }
 
 const detailedVisualRoles = new Set(["subject", "component", "input", "output"]);
@@ -263,6 +151,8 @@ const detailedVisualRoles = new Set(["subject", "component", "input", "output"])
 
 
 export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
+  // Do not mutate a lesson used by playback or the caller.
+  plan = structuredClone(plan);
   if (!Array.isArray(plan.objects)) plan.objects = [];
   if (!Array.isArray(plan.connections)) plan.connections = [];
   if (!Array.isArray(plan.segments)) plan.segments = [];
@@ -304,22 +194,14 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
     obj.height = Math.max(minH, obj.height || 100);
   }
 
-  // 2. Domain-agnostic visual repair (no domain-specific hardcoded coordinate hijacking)
-  const templateObj = plan.objects.find((o) => o.shapeType === "custom-template");
-  if (templateObj && plan.objects.length > 1) {
-    // An all-in-one custom-template card already incorporates all components internally
-    plan.objects = [templateObj];
-    plan.connections = [];
-    for (const seg of plan.segments) {
-      seg.targetIds = [templateObj.id];
-    }
-  }
+  // Semantic cards may coexist with charts and ordinary diagram nodes.
 
   // 3. Ensure every visual object has rich, meaningful vector parts (NO EMPTY RECTANGLES!)
   for (const obj of plan.objects) {
     if (
       BACKDROP_ROLES.has(obj.role) ||
       obj.shapeType === "frame" ||
+      obj.shapeType === "custom-template" ||
       obj.shapeType === "custom-chart" ||
       obj.shapeType === "custom-svg"
     ) {
@@ -592,7 +474,7 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
   }
 
   // 4. Guarantee 100% teaching coverage without fatal errors
-  const taught = new Set(plan.segments.flatMap((segment) => segment?.targetIds || []));
+  const taught = new Set(plan.segments.flatMap((segment) => (segment?.targetIds || []).map((id) => id.split("#")[0])));
   const untaught = plan.objects.filter((object) => detailedVisualRoles.has(object.role) && !taught.has(object.id));
   if (untaught.length && plan.segments.length > 0) {
     const lastSegment = plan.segments[plan.segments.length - 1];
@@ -604,7 +486,7 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
   }
 
   // 4b. Reconcile segment targetIds so they always match existing object IDs
-  const existingObjectIds = new Set(plan.objects.map((o) => o.id));
+  const existingObjectIds = new Set([...plan.objects.map((o) => o.id), ...plan.connections.map((c) => c.id)]);
   const defaultTargetId = plan.objects[0]?.id;
 
   for (const seg of plan.segments) {
@@ -612,7 +494,7 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
       seg.targetIds = defaultTargetId ? [defaultTargetId] : [];
       continue;
     }
-    let validTargets = seg.targetIds.filter((id) => existingObjectIds.has(id));
+    let validTargets = seg.targetIds.filter((id) => existingObjectIds.has(id.split("#")[0]));
 
     if (validTargets.length === 0 && seg.targetIds.length > 0) {
       for (const target of seg.targetIds) {
@@ -823,518 +705,81 @@ function harmonizeGraphObjects(plan: LessonPlan): void {
   }
 }
 
+/** Sanitize a scene without moving or shrinking it. ELK owns spatial layout. */
 export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   const plan = repairAndValidateLessonPlan(rawPlan);
-  const quantitative = plan.diagramType === "quantitative"
-    || plan.objects.some((object) => object.parts.some((part) => part.type === "axes"))
-    || /\b(graph|plot|chart|coordinate system|x-axis|y-axis|axes)\b/i.test(plan.visualStrategy);
-
-  const ids = new Set<string>();
+  const usedIds = new Set<string>();
   const idMap = new Map<string, string>();
-
-  // 1. Initial sanitization of object sizes & IDs
-  const sanitizedObjects: VisualObject[] = plan.objects.map((object, index) => {
-    const baseId = safeId(object.id, `object-${index + 1}`);
-    let objectId = baseId;
+  const allocateId = (value: string, fallback: string) => {
+    const base = safeId(value, fallback);
+    let id = base;
     let suffix = 2;
-    while (ids.has(objectId)) objectId = `${baseId.slice(0, 50)}-${suffix++}`;
-    ids.add(objectId);
-    idMap.set(object.id, objectId);
-
-    const hasAxes = object.parts.some((part) => part.type === "axes");
-    const isBackdrop = BACKDROP_ROLES.has(object.role) || object.shapeType === "frame";
-    const isFormulaNote = object.shapeType === "note" && object.role === "annotation" && /[=+Δ\\/*^]/.test(object.label);
-    const isFormula = object.role === "formula" || isFormulaNote || /^(formula|equation|governing equation|learning equation|loss equation)/i.test(object.label.trim());
-
-    const isCustomSemantic = object.shapeType === "custom-template" || object.shapeType === "custom-chart" || object.shapeType === "custom-svg";
-
-    // Ensure legible dimensions so formulas and labels have ample breathing room
-    const minW = isCustomSemantic ? 320 : hasAxes ? 360 : isBackdrop ? 440 : isFormula ? 260 : 150;
-    const maxW = isCustomSemantic ? 880 : isBackdrop ? 1080 : hasAxes ? 820 : 580;
-    const minH = isCustomSemantic ? 220 : hasAxes ? 240 : isBackdrop ? 260 : isFormula ? 88 : 80;
-    const maxH = isCustomSemantic ? 580 : isBackdrop ? 660 : hasAxes ? 520 : 480;
-
-    const width = clamp(object.width, minW, maxW);
-    const height = clamp(object.height, minH, maxH);
-
+    while (usedIds.has(id)) id = `${base.slice(0, 48)}-${suffix++}`;
+    usedIds.add(id);
+    return id;
+  };
+  const objects = plan.objects.map((object, index) => {
+    const id = allocateId(object.id, `object-${index + 1}`);
+    if (!idMap.has(object.id)) idMap.set(object.id, id);
+    const { width, height } = getVisualFootprint(object);
+    const semantic = ["custom-template", "custom-chart", "custom-svg"].includes(object.shapeType);
     return {
       ...object,
-      id: objectId,
+      id,
       label: formatMathFormula(object.label).replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim().slice(0, 80),
-      labelPlacement: hasAxes ? "none" as const : object.labelPlacement,
+      labelPlacement: object.parts.some((part) => part.type === "axes") ? "none" as const : object.labelPlacement,
       width,
       height,
-      x: clamp(object.x, EDGE, CANVAS_WIDTH - width - EDGE),
-      y: clamp(object.y, EDGE, CANVAS_HEIGHT - height - EDGE),
-      parts: isCustomSemantic ? object.parts : sanitizeParts(object.parts, width, height, object.x, object.y, object.role),
+      x: Number.isFinite(object.x) ? object.x : 0,
+      y: Number.isFinite(object.y) ? object.y : 0,
+      parts: semantic ? object.parts : sanitizeParts(object.parts, width, height, object.role),
     };
   });
-
-  // 2. Universal Topological & Stage-Based Spatial Engine (Domain-Agnostic)
-  // Map connections using idMap
-  const mappedConnections = plan.connections.map((c) => ({
-    ...c,
-    from: idMap.get(c.from) ?? c.from,
-    to: idMap.get(c.to) ?? c.to,
-  }));
-
-  // Classify objects by intrinsic pedagogical role
-  const containers: VisualObject[] = [];
-  const formulas: VisualObject[] = [];
-  const functional: VisualObject[] = [];
-
-  for (const obj of sanitizedObjects) {
-    const isConnected = mappedConnections.some((c) => c.from === obj.id || c.to === obj.id);
-    const isFormula =
-      obj.role === "formula" ||
-      (obj.role === "annotation" && obj.shapeType === "note") ||
-      obj.shapeType === "note" ||
-      /^(formula|equation|governing equation|learning equation|loss equation)/i.test(obj.label.trim());
-
-    const isContainer = BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame";
-
-    if (isFormula && !isConnected) {
-      formulas.push(obj);
-    } else if (isContainer) {
-      containers.push(obj);
-    } else {
-      functional.push(obj);
-    }
+  const objectIds = new Set(objects.map((object) => object.id));
+  for (const object of objects) {
+    const parentId = object.parentId ? idMap.get(object.parentId) : undefined;
+    object.parentId = parentId && parentId !== object.id && objectIds.has(parentId) ? parentId : undefined;
   }
-
-  // Parent-child containment detection (e.g. neurons in a layer, gates in an ALU)
-  const childToContainer = new Map<string, string>();
-  const containerToChildren = new Map<string, VisualObject[]>();
-
-  for (const c of containers) {
-    const children: VisualObject[] = [];
-    for (const f of functional) {
-      const cx = f.x + f.width / 2;
-      const cy = f.y + f.height / 2;
-      const inside = cx >= c.x - 30 && cx <= c.x + c.width + 30 && cy >= c.y - 30 && cy <= c.y + c.height + 30;
-      const nameMatch = f.id.toLowerCase().includes(c.id.toLowerCase()) || (c.id.includes("layer") && f.id.includes("neuron"));
-      if ((inside || nameMatch) && !childToContainer.has(f.id)) {
-        children.push(f);
-        childToContainer.set(f.id, c.id);
-      }
-    }
-    if (children.length > 0) {
-      containerToChildren.set(c.id, children);
-      // Layout children inside container:
-      // If container is a layer of neurons/nodes, stack vertically.
-      // Otherwise, lay out components/stages horizontally across rows.
-      const isNeuralLayer =
-        c.id.toLowerCase().includes("layer") &&
-        children.some(
-          (ch) =>
-            ch.id.toLowerCase().includes("neuron") ||
-            ch.id.toLowerCase().includes("node") ||
-            /^[xhŷ]\d*$/i.test(ch.label.trim()) ||
-            ch.parts.some((p) => p.type === "ellipse")
-        );
-
-      if (isNeuralLayer) {
-        let curY = 64; // Clearance for container header/pill
-        let maxW = 0;
-        for (const ch of children) {
-          ch.x = 24;
-          ch.y = curY;
-          curY += ch.height + 20;
-          maxW = Math.max(maxW, ch.width);
-        }
-        c.width = Math.max(c.width, maxW + 48);
-        c.height = Math.max(c.height, curY + 24);
-      } else {
-        // Horizontal flow of components/stages inside container (e.g. CPU chip stages, machine parts)
-        const CHILD_H_GAP = 56;
-        const CHILD_V_GAP = 28;
-        const CONTAINER_PAD_X = 40;
-        const CONTAINER_PAD_TOP = 64;
-        const maxW = 1000;
-
-        let curX = CONTAINER_PAD_X;
-        let curY = CONTAINER_PAD_TOP;
-        let rowH = 0;
-        let maxRowW = 0;
-
-        for (let i = 0; i < children.length; i++) {
-          const ch = children[i];
-          if (curX + ch.width + CONTAINER_PAD_X > maxW && i > 0) {
-            curX = CONTAINER_PAD_X;
-            curY += rowH + CHILD_V_GAP;
-            rowH = 0;
-          }
-          ch.x = curX;
-          ch.y = curY;
-          curX += ch.width + CHILD_H_GAP;
-          rowH = Math.max(rowH, ch.height);
-          maxRowW = Math.max(maxRowW, curX);
-        }
-
-        c.width = Math.max(c.width, maxRowW + CONTAINER_PAD_X - CHILD_H_GAP);
-        c.height = Math.max(c.height, curY + rowH + 32);
-      }
-    }
-  }
-
-  // Top-level functional units: containers (with children or standalone parts) + standalone functional objects
-  const topLevelUnits: VisualObject[] = [
-    ...containers.filter((c) => (containerToChildren.get(c.id)?.length || 0) > 0 || (c.parts && c.parts.length > 0)),
-    ...functional.filter((f) => !childToContainer.has(f.id)),
-  ];
-
-  // Graph Topological Ranking
-  const idToUnit = new Map<string, VisualObject>();
-  for (const u of topLevelUnits) idToUnit.set(u.id, u);
-  for (const [cId, children] of containerToChildren.entries()) {
-    const parent = idToUnit.get(cId);
-    if (parent) {
-      for (const ch of children) idToUnit.set(ch.id, parent);
-    }
-  }
-
-  const adj = new Map<string, Set<string>>();
-  const inDegree = new Map<string, number>();
-  for (const u of topLevelUnits) {
-    adj.set(u.id, new Set<string>());
-    inDegree.set(u.id, 0);
-  }
-
-  for (const conn of mappedConnections) {
-    const fromUnit = idToUnit.get(conn.from);
-    const toUnit = idToUnit.get(conn.to);
-    if (fromUnit && toUnit && fromUnit.id !== toUnit.id) {
-      if (!adj.get(fromUnit.id)!.has(toUnit.id)) {
-        adj.get(fromUnit.id)!.add(toUnit.id);
-        inDegree.set(toUnit.id, (inDegree.get(toUnit.id) || 0) + 1);
-      }
-    }
-  }
-
-  // Calculate topological ranks (longest path from sources, cycle breaking)
-  const ranks = new Map<string, number>();
-  for (const u of topLevelUnits) ranks.set(u.id, 0);
-
-  for (let iter = 0; iter < topLevelUnits.length; iter++) {
-    let changed = false;
-    for (const u of topLevelUnits) {
-      const uRank = ranks.get(u.id) || 0;
-      for (const vId of adj.get(u.id) || []) {
-        const vRank = ranks.get(vId) || 0;
-        if (vRank < uRank + 1 && uRank + 1 < topLevelUnits.length) {
-          ranks.set(vId, uRank + 1);
-          changed = true;
-        }
-      }
-    }
-    if (!changed) break;
-  }
-
-  let maxRank = Math.max(0, ...Array.from(ranks.values()));
-
-  // If all units have rank 0 (e.g. parallel entities or disconnected graph), distribute horizontally across up to 4 columns based on initial X
-  if (maxRank === 0 && topLevelUnits.length > 1) {
-    const sorted = [...topLevelUnits].sort((a, b) => a.x - b.x);
-    const targetCols = Math.min(sorted.length, Math.min(4, Math.ceil(Math.sqrt(sorted.length * 2))));
-    const itemsPerCol = Math.ceil(sorted.length / targetCols);
-    for (let i = 0; i < sorted.length; i++) {
-      const colIdx = Math.floor(i / itemsPerCol);
-      ranks.set(sorted[i].id, colIdx);
-    }
-    maxRank = Math.max(0, ...Array.from(ranks.values()));
-  }
-
-  const numLevels = Math.max(1, maxRank + 1);
-
-  // Group units by rank
-  const rankGroups: VisualObject[][] = Array.from({ length: numLevels }, () => []);
-  for (const u of topLevelUnits) {
-    const r = Math.min(numLevels - 1, ranks.get(u.id) || 0);
-    rankGroups[r].push(u);
-  }
-
-  for (const grp of rankGroups) {
-    grp.sort((a, b) => a.y - b.y);
-  }
-
-  // Determine dominant flow orientation from connections and initial coordinates (pure geometry)
-  let verticalScore = 0;
-  let horizontalScore = 0;
-
-  for (const conn of plan.connections) {
-    const fromObj = plan.objects.find((o) => o.id === conn.from);
-    const toObj = plan.objects.find((o) => o.id === conn.to);
-    if (!fromObj || !toObj) continue;
-
-    const dx = Math.abs((toObj.x + toObj.width / 2) - (fromObj.x + fromObj.width / 2));
-    const dy = Math.abs((toObj.y + toObj.height / 2) - (fromObj.y + fromObj.height / 2));
-
-    const isExplicitVerticalAnchor =
-      (conn.fromAnchor === "top" || conn.fromAnchor === "bottom") &&
-      (conn.toAnchor === "top" || conn.toAnchor === "bottom");
-
-    if (isExplicitVerticalAnchor || dy > dx * 1.5) {
-      verticalScore++;
-    } else {
-      horizontalScore++;
-    }
-  }
-
-  const isVerticalFlow =
-    (plan.diagramType as string) === "stack" ||
-    (plan.diagramType as string) === "layers" ||
-    (verticalScore > horizontalScore && verticalScore >= 2);
-
-  if (isVerticalFlow) {
-    // Vertical flow (e.g. atmospheric layers, water columns, vertical stacks)
-    const rowHeight = USABLE_H / numLevels;
-    const rank0Y = rankGroups[0]?.[0]?.y ?? 0;
-    const lastRankY = rankGroups[numLevels - 1]?.[0]?.y ?? 0;
-    const invertVertical = rank0Y > lastRankY;
-
-    for (let r = 0; r < numLevels; r++) {
-      const grp = rankGroups[r];
-      if (grp.length === 0) continue;
-
-      const effectiveRow = invertVertical ? numLevels - 1 - r : r;
-      const rowCenterY = EDGE + (effectiveRow + 0.5) * rowHeight;
-      const totalGrpW = grp.reduce((sum, u) => sum + u.width, 0) + (grp.length - 1) * 28;
-      let curX = Math.max(EDGE, EDGE + (USABLE_W - totalGrpW) / 2);
-
-      for (const u of grp) {
-        u.x = Math.round(curX);
-        u.y = Math.round(rowCenterY - u.height / 2);
-        curX += u.width + 28;
-
-        const children = containerToChildren.get(u.id);
-        if (children) {
-          for (const ch of children) {
-            ch.x = u.x + ch.x;
-            ch.y = u.y + ch.y;
-          }
-        }
-      }
-    }
-  } else {
-    // Horizontal stage columns (standard for pipelines, neural networks, causal cycles, circuits, celestial bodies)
-    const hasFormulas = formulas.length > 0;
-    const functionalUsableH = hasFormulas ? USABLE_H - 180 : USABLE_H;
-    const colWidth = USABLE_W / numLevels;
-
-    for (let r = 0; r < numLevels; r++) {
-      const grp = rankGroups[r];
-      if (grp.length === 0) continue;
-
-      const colCenterX = EDGE + (r + 0.5) * colWidth;
-      const totalGrpH = grp.reduce((sum, u) => sum + u.height, 0) + (grp.length - 1) * 28;
-      let curY = Math.max(EDGE, EDGE + (functionalUsableH - totalGrpH) / 2);
-
-      for (const u of grp) {
-        u.x = Math.round(colCenterX - u.width / 2);
-        u.y = Math.round(curY);
-        curY += u.height + 28;
-
-        const children = containerToChildren.get(u.id);
-        if (children) {
-          for (const ch of children) {
-            ch.x = u.x + ch.x;
-            ch.y = u.y + ch.y;
-          }
-        }
-      }
-    }
-
-    // Place Formula / Annotation Cards in Dedicated Bottom Ribbon
-    if (hasFormulas) {
-      const totalFormulaW = formulas.reduce((sum, f) => sum + f.width, 0) + (formulas.length - 1) * 32;
-      let formulaStartX = Math.max(EDGE, Math.round((CANVAS_WIDTH - totalFormulaW) / 2));
-      const formulaY = Math.round(CANVAS_HEIGHT - EDGE - Math.max(...formulas.map((f) => f.height)));
-
-      for (const f of formulas) {
-        f.x = formulaStartX;
-        f.y = formulaY;
-        formulaStartX += f.width + 32;
-      }
-    }
-  }
-
-  // Multi-Pass AABB Collision Relaxation (Guaranteed 0 Collisions)
-  const allTopItems: VisualObject[] = [...topLevelUnits, ...formulas];
-
-  for (let iter = 0; iter < 50; iter++) {
-    let shifted = false;
-    for (let i = 0; i < allTopItems.length; i++) {
-      for (let j = i + 1; j < allTopItems.length; j++) {
-        const a = allTopItems[i];
-        const b = allTopItems[j];
-        const gap = 24;
-
-        const overlapX = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x) + gap;
-        const overlapY = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y) + gap;
-
-        if (overlapX > 0 && overlapY > 0) {
-          shifted = true;
-          if (overlapX <= overlapY) {
-            const shift = Math.ceil(overlapX / 2);
-            if (b.x >= a.x) {
-              b.x += shift;
-              a.x -= shift;
-            } else {
-              a.x += shift;
-              b.x -= shift;
-            }
-          } else {
-            const shift = Math.ceil(overlapY / 2);
-            if (b.y >= a.y) {
-              b.y += shift;
-              a.y -= shift;
-            } else {
-              a.y += shift;
-              b.y -= shift;
-            }
-          }
-
-          // Propagate shifts to children
-          if (containerToChildren.has(a.id)) {
-            const children = containerToChildren.get(a.id)!;
-            const minChX = Math.min(...children.map((c) => c.x));
-            const minChY = Math.min(...children.map((c) => c.y));
-            const dx = a.x + 24 - minChX;
-            const dy = a.y + 64 - minChY;
-            for (const ch of children) {
-              ch.x += dx;
-              ch.y += dy;
-            }
-          }
-          if (containerToChildren.has(b.id)) {
-            const children = containerToChildren.get(b.id)!;
-            const minChX = Math.min(...children.map((c) => c.x));
-            const minChY = Math.min(...children.map((c) => c.y));
-            const dx = b.x + 24 - minChX;
-            const dy = b.y + 64 - minChY;
-            for (const ch of children) {
-              ch.x += dx;
-              ch.y += dy;
-            }
-          }
-        }
-      }
-    }
-    if (!shifted) break;
-  }
-
-  // Global Proportional Fit & Centering (GUARANTEE 16:9 CANVAS FIT)
-  const allFinalObjects: VisualObject[] = [
-    ...topLevelUnits,
-    ...formulas,
-    ...Array.from(containerToChildren.values()).flat(),
-  ];
-  const uniqueMap = new Map<string, VisualObject>();
-  for (const o of allFinalObjects) uniqueMap.set(o.id, o);
-  const unique = Array.from(uniqueMap.values());
-
-  let minX = Math.min(...unique.map((o) => o.x));
-  let maxX = Math.max(...unique.map((o) => o.x + o.width));
-  let minY = Math.min(...unique.map((o) => o.y));
-  let maxY = Math.max(...unique.map((o) => o.y + o.height));
-  let totalW = maxX - minX;
-  let totalH = maxY - minY;
-
-  const scaleX = USABLE_W / Math.max(1, totalW);
-  const scaleY = USABLE_H / Math.max(1, totalH);
-  const scale = Math.min(1.0, scaleX, scaleY);
-
-  if (scale < 1.0) {
-    const centerX = minX + totalW / 2;
-    const centerY = minY + totalH / 2;
-
-    for (const o of unique) {
-      o.width = Math.round(o.width * scale);
-      o.height = Math.round(o.height * scale);
-      o.x = Math.round(centerX + (o.x - centerX) * scale);
-      o.y = Math.round(centerY + (o.y - centerY) * scale);
-    }
-
-    minX = Math.min(...unique.map((o) => o.x));
-    maxX = Math.max(...unique.map((o) => o.x + o.width));
-    minY = Math.min(...unique.map((o) => o.y));
-    maxY = Math.max(...unique.map((o) => o.y + o.height));
-    totalW = maxX - minX;
-    totalH = maxY - minY;
-  }
-
-  // Center within 1280x720 canvas
-  const shiftX = Math.round((CANVAS_WIDTH - totalW) / 2 - minX);
-  const shiftY = Math.round((CANVAS_HEIGHT - totalH) / 2 - minY);
-
-  for (const o of unique) {
-    o.x += shiftX;
-    o.y += shiftY;
-  }
-
-  const validUniqueIds = new Set(unique.map((o) => o.id));
-  const connectionIds = new Set<string>();
-
   const connections = plan.connections.flatMap((connection, index) => {
-    const from = idMap.get(connection.from) ?? connection.from;
-    const to = idMap.get(connection.to) ?? connection.to;
-    if (!from || !to || from === to) return [];
-
-    const baseId = `link-${safeId(connection.id, String(index + 1))}`;
-    let connectionId = baseId;
-    let suffix = 2;
-    while (ids.has(connectionId) || connectionIds.has(connectionId)) connectionId = `${baseId.slice(0, 50)}-${suffix++}`;
-    connectionIds.add(connectionId);
-    idMap.set(connection.id, connectionId);
-    idMap.set(connectionId, connectionId);
-    validUniqueIds.add(connectionId);
-
-    const fromObject = unique.find((object) => object.id === from);
-    const toObject = unique.find((object) => object.id === to);
-    if (!fromObject || !toObject) return [];
-
-    const dx = (toObject.x + toObject.width / 2) - (fromObject.x + fromObject.width / 2);
-    const dy = (toObject.y + toObject.height / 2) - (fromObject.y + fromObject.height / 2);
-    const automaticAnchors = Math.abs(dx) >= Math.abs(dy)
-      ? { fromAnchor: dx >= 0 ? "right" as const : "left" as const, toAnchor: dx >= 0 ? "left" as const : "right" as const }
-      : { fromAnchor: dy >= 0 ? "bottom" as const : "top" as const, toAnchor: dy >= 0 ? "top" as const : "bottom" as const };
-
-    const rawLabel = (connection.label || "").replace(/[<>]/g, "").trim().slice(0, 18);
-
+    const from = idMap.get(connection.from);
+    const to = idMap.get(connection.to);
+    if (!from || !to) return [];
+    // Keep self-loops and parallel links: they carry distinct teaching meaning.
+    const id = allocateId(connection.id, `link-${index + 1}`);
+    if (!idMap.has(connection.id)) idMap.set(connection.id, id);
     return [{
       ...connection,
-      id: connectionId,
+      id,
       from,
       to,
-      label: rawLabel,
-      route: connection.route === "curve" ? "curve" as const : "elbow" as const,
-      ...(connection.route === "curve" ? {} : automaticAnchors),
-      bend: clamp(connection.bend || 0, -160, 160),
+      label: (connection.label || "").replace(/[<>]/g, "").trim().slice(0, 80),
+      bend: Number.isFinite(connection.bend) ? connection.bend : 0,
     }];
   });
-
-  const fallbackId = unique[0]?.id;
+  const validTargets = new Set([...objectIds, ...connections.map((connection) => connection.id)]);
+  const fallbackId = objects[0]?.id;
   const segments = plan.segments.map((segment, index) => {
-    const targetIds = [...new Set(segment.targetIds.map((id) => idMap.get(id) ?? id).filter((id): id is string => typeof id === "string" && validUniqueIds.has(id)))];
+    const targetIds = [...new Set(segment.targetIds.map((id) => {
+      const [base, part] = id.split("#");
+      const mapped = idMap.get(base) ?? base;
+      return part === undefined ? mapped : `${mapped}#${part}`;
+    }).filter((id) => validTargets.has(id.split("#")[0])))];
     return {
       ...segment,
       id: safeId(segment.id, `segment-${index + 1}`),
       title: segment.title.replace(/[<>]/g, "").slice(0, 80),
-      narration: segment.narration.replace(/[<>]/g, "").slice(0, 700),
+      narration: segment.narration.replace(/[<>]/g, "").slice(0, 2400),
       durationMs: clamp(segment.durationMs, 1200, 45000),
-      targetIds: targetIds.length ? targetIds : fallbackId ? [fallbackId] : segment.targetIds,
+      targetIds: targetIds.length ? targetIds : fallbackId ? [fallbackId] : [],
     };
   });
-
   return {
     ...plan,
-    diagramType: quantitative ? "quantitative" : plan.diagramType,
     title: (plan.title || "").replace(/[<>]/g, "").slice(0, 120),
     summary: (plan.summary || "").replace(/[<>]/g, "").slice(0, 600),
     visualStrategy: (plan.visualStrategy || "").replace(/[<>]/g, "").slice(0, 260),
-    objects: unique,
+    objects,
     connections,
     segments,
   };
 }
-

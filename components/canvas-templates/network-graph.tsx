@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo } from "react";
+import React, { useId, useMemo } from "react";
+import { computeNetworkGeometry } from "../../lib/template-geometry";
 import { getThemeColor } from "./theme";
 
 export interface NetworkGraphNode {
@@ -10,14 +11,12 @@ export interface NetworkGraphNode {
   val?: string | number;
   active?: boolean;
 }
-
 export interface NetworkGraphGroup {
   id?: string;
   label: string;
   color?: string;
   nodes: (string | NetworkGraphNode)[];
 }
-
 export interface NetworkGraphConnection {
   from: string | number;
   to: string | number;
@@ -25,7 +24,6 @@ export interface NetworkGraphConnection {
   weight?: number | string;
   active?: boolean;
 }
-
 export interface NetworkGraphData {
   title?: string;
   subtitle?: string;
@@ -35,7 +33,6 @@ export interface NetworkGraphData {
   direction?: "horizontal" | "vertical";
   themeColor?: string;
 }
-
 interface NetworkGraphProps {
   w: number;
   h: number;
@@ -45,316 +42,79 @@ interface NetworkGraphProps {
   data: NetworkGraphData;
 }
 
-export function NetworkGraphTemplate({
-  w,
-  h,
-  title: propTitle,
-  subtitle: propSubtitle,
-  themeColor: propThemeColor,
-  data,
-}: NetworkGraphProps) {
+export function NetworkGraphTemplate({ w, h, title: propTitle, subtitle: propSubtitle, themeColor: propThemeColor, data }: NetworkGraphProps) {
   const title = data?.title || propTitle || "Neural Network Architecture";
-  const subtitle = data?.subtitle || propSubtitle || "Multilayer Perceptron / Connected Layers";
+  const subtitle = data?.subtitle || propSubtitle || "Connected Layers";
   const theme = getThemeColor(data?.themeColor || propThemeColor || "violet");
-
-interface NormalizedNode {
-  id: string;
-  label: string;
-  sublabel?: string;
-  val?: string | number;
-  active?: boolean;
-}
-
-interface NormalizedGroup {
-  id: string;
-  label: string;
-  color: string;
-  nodes: NormalizedNode[];
-}
-
-  // Normalize groups
-  const normalizedGroups = useMemo<NormalizedGroup[]>(() => {
-    const rawGroups = Array.isArray(data?.groups) ? data.groups : [];
-    if (rawGroups.length === 0) {
-      return [
-        {
-          id: "g0",
-          label: "Input Layer",
-          color: "blue",
-          nodes: [
-            { id: "g0-n0", label: "x₁" },
-            { id: "g0-n1", label: "x₂" },
-            { id: "g0-n2", label: "x₃" },
-          ],
-        },
-        {
-          id: "g1",
-          label: "Hidden Layer",
-          color: "violet",
-          nodes: [
-            { id: "g1-n0", label: "h₁" },
-            { id: "g1-n1", label: "h₂" },
-            { id: "g1-n2", label: "h₃" },
-            { id: "g1-n3", label: "h₄" },
-          ],
-        },
-        {
-          id: "g2",
-          label: "Output Layer",
-          color: "emerald",
-          nodes: [{ id: "g2-n0", label: "ŷ" }],
-        },
-      ];
-    }
-
-    return rawGroups.map((group, gIdx) => {
-      const gColor = group.color || (gIdx === 0 ? "blue" : gIdx === rawGroups.length - 1 ? "emerald" : "violet");
-      const nodes: NormalizedNode[] = Array.isArray(group.nodes)
-        ? group.nodes.map((node, nIdx) => {
-            if (typeof node === "string") {
-              return { id: `g${gIdx}-n${nIdx}`, label: node };
-            }
-            return {
-              id: node?.id || `g${gIdx}-n${nIdx}`,
-              label: node?.label || `N${nIdx + 1}`,
-              sublabel: node?.sublabel,
-              val: node?.val,
-              active: node?.active,
-            };
-          })
-        : [{ id: `g${gIdx}-n0`, label: `Node 1` }];
-
-      return {
-        id: group.id || `group-${gIdx}`,
-        label: group.label || `Layer ${gIdx + 1}`,
-        color: gColor,
-        nodes,
-      };
-    });
-  }, [data?.groups]);
-
-
-  // Compute layout coordinates for SVG connections
-  const numGroups = normalizedGroups.length;
-  const paddingX = 40;
-  const headerHeight = 70;
-  const footerHeight = 24;
-  const contentHeight = Math.max(120, h - headerHeight - footerHeight);
-  const contentWidth = Math.max(200, w - paddingX * 2);
-
-  const groupCenters = useMemo(() => {
-    if (numGroups <= 1) return [w / 2];
-    const step = contentWidth / (numGroups - 1);
-    return normalizedGroups.map((_, i) => paddingX + i * step);
-  }, [numGroups, contentWidth, w, normalizedGroups]);
-
-  const nodePositions = useMemo(() => {
-    const map = new Map<string, { x: number; y: number; color: string }>();
-
-    normalizedGroups.forEach((group, gIdx) => {
-      const gx = groupCenters[gIdx];
-      const count = group.nodes.length;
-      const stepY = count > 1 ? (contentHeight - 60) / (count - 1) : 0;
-      const startY = count > 1 ? headerHeight + 30 : headerHeight + contentHeight / 2;
-
-      group.nodes.forEach((node, nIdx) => {
-        const ny = count > 1 ? startY + nIdx * stepY : startY;
-        map.set(node.id, { x: gx, y: ny, color: group.color });
-      });
-    });
-
-    return map;
-  }, [normalizedGroups, groupCenters, headerHeight, contentHeight]);
-
-  // Generate connection paths
-  const connections = useMemo(() => {
-    const rawConns = data?.connections ?? "fully-connected";
-    const edges: {
-      id: string;
-      d: string;
-      color: string;
-      label?: string;
-    }[] = [];
-
-    if (rawConns === "fully-connected" || typeof rawConns === "string") {
-      // Connect each group i to group i + 1
-      for (let g = 0; g < normalizedGroups.length - 1; g++) {
-        const fromGroup = normalizedGroups[g];
-        const toGroup = normalizedGroups[g + 1];
-
-        for (const fromNode of fromGroup.nodes) {
-          const p1 = nodePositions.get(fromNode.id);
-          if (!p1) continue;
-
-          for (const toNode of toGroup.nodes) {
-            const p2 = nodePositions.get(toNode.id);
-            if (!p2) continue;
-
-            const dx = (p2.x - p1.x) * 0.45;
-            const d = `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`;
-            edges.push({
-              id: `${fromNode.id}->${toNode.id}`,
-              d,
-              color: fromGroup.color,
-            });
-          }
-        }
-      }
-    } else if (Array.isArray(rawConns)) {
-      rawConns.forEach((conn, idx) => {
-        const fromNodeId = String(conn.from);
-        const toNodeId = String(conn.to);
-        const p1 = nodePositions.get(fromNodeId);
-        const p2 = nodePositions.get(toNodeId);
-        if (p1 && p2) {
-          const dx = (p2.x - p1.x) * 0.45;
-          const d = `M ${p1.x} ${p1.y} C ${p1.x + dx} ${p1.y}, ${p2.x - dx} ${p2.y}, ${p2.x} ${p2.y}`;
-          edges.push({
-            id: `conn-${idx}`,
-            d,
-            color: p1.color,
-            label: conn.label || (conn.weight != null ? String(conn.weight) : undefined),
-          });
-        }
-      });
-    }
-
-    return edges;
-  }, [data?.connections, normalizedGroups, nodePositions]);
+  const uniqueId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
+  const gradientId = `network-glow-${uniqueId}`;
+  const markerId = `network-arrow-${uniqueId}`;
+  const geometry = useMemo(() => computeNetworkGeometry(data || {}, w, h), [data, w, h]);
+  const connectionMode = data?.connections === "sequential" ? "Sequential" : Array.isArray(data?.connections) ? "Custom connections" : "Fully Connected";
 
   return (
-    <div
-      className="relative flex h-full w-full flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 p-4 shadow-[0_8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md select-none transition-all dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-100"
-      style={{ width: `${w}px`, height: `${h}px` }}
-    >
-      {/* Top Header Card */}
-      <div className="z-10 flex items-center justify-between border-b border-slate-100 pb-2.5 dark:border-slate-800">
-        <div className="flex items-center gap-2.5">
-          <span
-            className="flex h-6 w-6 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm"
-            style={{ backgroundColor: theme.primary }}
-          >
-            NN
-          </span>
-          <div>
-            <h3 className="font-semibold text-slate-800 text-sm tracking-tight dark:text-slate-100">
-              {title}
-            </h3>
-            {subtitle && (
-              <p className="text-[11px] text-slate-400 dark:text-slate-400">
-                {subtitle}
-              </p>
-            )}
+    <div className="relative overflow-hidden rounded-2xl border border-slate-200/90 bg-white/95 shadow-[0_8px_30px_rgba(15,23,42,0.08)] backdrop-blur-md select-none dark:border-slate-800 dark:bg-slate-900/95 dark:text-slate-100"
+      style={{ width: w, height: h }}>
+      <div className="absolute inset-x-4 top-4 z-10 flex items-start justify-between gap-3 border-b border-slate-100 pb-3 dark:border-slate-800">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm" style={{ backgroundColor: theme.primary }}>NN</span>
+          <div className="min-w-0">
+            <h3 className="line-clamp-2 text-sm font-semibold tracking-tight text-slate-800 dark:text-slate-100">{title}</h3>
+            <p className="line-clamp-1 text-[11px] text-slate-400">{subtitle}</p>
           </div>
         </div>
-
-        <div className="flex items-center gap-1.5">
-          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 font-medium text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-300">
-            {normalizedGroups.length} Layers
-          </span>
-          <span className="rounded-full bg-purple-50 px-2 py-0.5 font-medium text-[10px] text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">
-            Fully Connected
-          </span>
+        <div className="flex shrink-0 flex-col items-end gap-1 text-[10px] font-medium">
+          <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{geometry.groups.length} Layers</span>
+          <span className="rounded-full bg-purple-50 px-2 py-0.5 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300">{connectionMode}</span>
         </div>
       </div>
 
-      {/* SVG Connection Layer */}
-      <svg
-        className="pointer-events-none absolute inset-0 h-full w-full"
-        style={{ zIndex: 1 }}
-      >
+      <svg className="pointer-events-none absolute inset-0" width={w} height={h} viewBox={`0 0 ${w} ${h}`} aria-hidden="true">
         <defs>
-          <linearGradient id="edgeGlow" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor={theme.primary} stopOpacity="0.4" />
-            <stop offset="100%" stopColor={theme.secondary} stopOpacity="0.4" />
+          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor={theme.primary} stopOpacity="0.55" />
+            <stop offset="100%" stopColor={theme.secondary} stopOpacity="0.55" />
           </linearGradient>
+          <marker id={markerId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill={theme.primary} />
+          </marker>
         </defs>
-        {connections.map((edge) => (
-          <path
-            key={edge.id}
-            d={edge.d}
-            fill="none"
-            stroke="url(#edgeGlow)"
-            strokeWidth="1.5"
-            strokeLinecap="round"
-            className="transition-all duration-300 hover:stroke-purple-500 hover:opacity-100"
-          />
+        {geometry.edges.map(edge => (
+          <g key={edge.id}>
+            <path d={edge.d} fill="none" stroke={`url(#${gradientId})`} strokeWidth="1.5" strokeLinecap="round" markerEnd={`url(#${markerId})`} />
+            {edge.labelBox ? <g>
+              <rect x={edge.labelBox.x} y={edge.labelBox.y} width={edge.labelBox.width} height={edge.labelBox.height} rx={5} className="fill-white/95 dark:fill-slate-900/95" />
+              <text x={edge.labelPosition.x} y={edge.labelBox.y + 17} textAnchor="middle" fontSize="11" fill={theme.primary}>
+                {edge.labelBox.lines.map((line, index) => <tspan key={index} x={edge.labelPosition.x} dy={index ? 17 : 0}>{line}</tspan>)}
+              </text>
+            </g> : edge.label && <text x={edge.labelPosition.x} y={edge.labelPosition.y - 5} textAnchor="middle" fontSize="10" fill={theme.primary}>{edge.label}</text>}
+          </g>
         ))}
       </svg>
 
-      {/* Layers Columns Container */}
-      <div className="relative z-10 flex flex-1 items-stretch justify-between px-2 pt-2">
-        {normalizedGroups.map((group, gIdx) => {
-          const groupTheme = getThemeColor(group.color);
-          return (
-            <div
-              key={group.id}
-              className="flex flex-col items-center justify-between"
-              style={{
-                width: `${Math.min(140, contentWidth / numGroups)}px`,
-              }}
-            >
-              {/* Group Header Badge */}
-              <div
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-center font-semibold text-[11px] shadow-sm backdrop-blur-sm"
-                style={{
-                  backgroundColor: groupTheme.bgLight,
-                  color: groupTheme.primary,
-                  border: `1px solid ${groupTheme.borderLight}`,
-                }}
-              >
-                <span
-                  className="h-1.5 w-1.5 rounded-full"
-                  style={{ backgroundColor: groupTheme.primary }}
-                />
-                <span>{group.label}</span>
-              </div>
+      {geometry.groups.map(group => {
+        const groupTheme = getThemeColor(group.color);
+        return <div key={group.id} className="absolute z-10 flex max-w-[140px] flex-col items-center text-center" style={{ left: group.x, top: group.y, transform: "translate(-50%, -50%)" }}>
+          <div className="rounded-xl border px-2.5 py-1 text-[11px] font-semibold shadow-sm backdrop-blur-sm"
+            style={{ color: groupTheme.primary, backgroundColor: groupTheme.bgLight, borderColor: groupTheme.borderLight }}>{group.label}</div>
+          {geometry.vertical && <span className="mt-1 text-[10px] text-slate-400">{group.nodes.length} nodes</span>}
+        </div>;
+      })}
 
-              {/* Group Nodes Stack */}
-              <div className="my-auto flex flex-col items-center justify-center gap-3 py-2">
-                {group.nodes.map((node) => {
-                  return (
-                    <div
-                      key={node.id}
-                      className="group relative flex items-center justify-center"
-                    >
-                      {/* Outer Glow Ring */}
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded-full border-2 bg-white text-center font-semibold text-xs shadow-md transition-transform duration-200 group-hover:scale-110 dark:bg-slate-900"
-                        style={{
-                          borderColor: groupTheme.primary,
-                          boxShadow: `0 0 12px ${groupTheme.glow}`,
-                          color: groupTheme.primary,
-                        }}
-                      >
-                        {node.label}
-                      </div>
+      {geometry.nodes.map(node => {
+        const nodeTheme = getThemeColor(node.color);
+        return <div key={node.id} data-network-node={node.id} className="absolute z-10" style={{ left: node.x - node.width / 2, top: node.y - node.height / 2, width: node.width, height: node.height }}>
+          <div className={`flex h-full w-full items-center justify-center border-2 bg-white px-1 text-center text-xs font-semibold shadow-md dark:bg-slate-900 ${node.width === node.height ? "rounded-full" : "rounded-xl"}`}
+            style={{ borderColor: nodeTheme.primary, color: nodeTheme.primary, boxShadow: `0 0 12px ${nodeTheme.glow}` }}>
+            <span className="line-clamp-3 break-words">{node.label}</span>
+          </div>
+          {(node.sublabel || node.val != null) && <span className="absolute left-1/2 top-full mt-1 w-32 -translate-x-1/2 text-center text-[9px] leading-tight text-slate-500 dark:text-slate-400">{node.sublabel || String(node.val)}</span>}
+        </div>;
+      })}
 
-                      {/* Optional Sublabel or Value Tooltip */}
-                      {node.sublabel && (
-                        <span className="absolute -bottom-4 whitespace-nowrap rounded px-1 text-[9px] font-medium text-slate-500 dark:text-slate-400">
-                          {node.sublabel}
-                        </span>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Node count pill */}
-              <div className="text-[10px] text-slate-400">
-                {group.nodes.length} {group.nodes.length === 1 ? "neuron" : "neurons"}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Footer Edge Label or Flow Indicator */}
-      <div className="z-10 mt-1 flex items-center justify-between border-t border-slate-100 pt-1 text-[10px] text-slate-400 dark:border-slate-800">
-        <span>◀ Forward Propagation</span>
-        <span>Weights & Biases (W, b)</span>
-        <span>Activation ▶</span>
+      <div className="absolute inset-x-4 bottom-3 z-10 flex items-center justify-between border-t border-slate-100 pt-2 text-[10px] text-slate-400 dark:border-slate-800">
+        <span>{data?.edgeLabel || `${geometry.edges.length} connections`}</span>
+        <span>{geometry.vertical ? "Flow ↓" : "Flow →"}</span>
       </div>
     </div>
   );
