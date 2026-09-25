@@ -36,6 +36,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/server.mjs ./server.mjs
+COPY --from=builder /app/lib/realtime-server.mjs ./lib/realtime-server.mjs
 
 EXPOSE 7860
 

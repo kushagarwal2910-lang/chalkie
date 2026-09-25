@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
-import { createServer } from "node:http";
 import { once } from "node:events";
 import test from "node:test";
 import { WebSocket } from "ws";
-import { attachRealtimeServer } from "../lib/realtime-server.mjs";
+import { attachRealtimeServer, RealtimeHttpServer } from "../lib/realtime-server.mjs";
 
 async function setup(t, options) {
-  const server = createServer();
-  const hub = attachRealtimeServer(server, async (_req, socket) => socket.destroy(), options);
+  const server = new RealtimeHttpServer();
+  const hub = attachRealtimeServer(server, options);
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   t.after(() => { for (const socket of hub.clients) socket.terminate(); hub.close(); server.close(); });
   const url = `ws://127.0.0.1:${server.address().port}/api/ws`;
   async function client(sessionId, clientOptions) {
     const socket = new WebSocket(url, clientOptions);
+    socket.on("error", () => {});
     t.after(() => socket.terminate());
     const received = [];
     socket.on("message", (raw) => received.push(JSON.parse(raw.toString())));
@@ -59,4 +59,28 @@ test("heartbeat terminates an unresponsive peer so it can reconnect", async (t) 
   const { client } = await setup(t, { heartbeatMs: 40 });
   const a = await client("lesson", { autoPong: false });
   await until(() => a.socket.readyState === WebSocket.CLOSED);
+});
+
+test("realtime upgrades bypass unrelated listeners, while other upgrades keep normal dispatch", async (t) => {
+  const server = new RealtimeHttpServer();
+  const hub = attachRealtimeServer(server);
+  let ordinaryUpgrades = 0;
+  server.on("upgrade", (_request, socket) => { ordinaryUpgrades++; socket.destroy(); });
+  t.after(() => { for (const socket of hub.clients) socket.terminate(); hub.close(); server.close(); });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const base = `ws://127.0.0.1:${server.address().port}`;
+  const realtime = new WebSocket(`${base}/api/ws?diagnostic=1`);
+  t.after(() => realtime.terminate());
+  const messages = [];
+  realtime.on("message", raw => messages.push(JSON.parse(raw.toString())));
+  await once(realtime, "open");
+  realtime.send(JSON.stringify({ type: "join", sessionId: "exclusive" }));
+  await until(() => messages.some(message => message.type === "joined"));
+  assert.equal(ordinaryUpgrades, 0);
+  const other = new WebSocket(`${base}/_next/diagnostic-upgrade`);
+  other.on("error", () => {});
+  t.after(() => other.terminate());
+  await new Promise(resolve => other.once("close", resolve));
+  assert.equal(ordinaryUpgrades, 1);
 });

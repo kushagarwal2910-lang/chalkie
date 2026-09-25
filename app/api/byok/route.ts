@@ -18,7 +18,9 @@ const inputSchema = z.object({
 function sameOrigin(request: NextRequest) {
   const origin = request.headers.get("origin");
   if (!origin) return true;
-  try { return new URL(origin).host === request.nextUrl.host; }
+  // Next's custom server can normalize nextUrl to its internal bind hostname
+  // (0.0.0.0 on Render). The incoming Host is the browser-facing authority.
+  try { return new URL(origin).host === (request.headers.get("host") || request.nextUrl.host); }
   catch { return false; }
 }
 

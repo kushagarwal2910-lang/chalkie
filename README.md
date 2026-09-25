@@ -333,6 +333,10 @@ npm run typecheck
 # Offline BYOK, quota rotation, error handling, retry state, and WebSocket tests (Node 24+)
 node --test lib/groq-pool-core.test.ts scratch/test-api-failures.mjs scratch/test-byok-credentials.mjs scratch/test-provider-retry.mjs scratch/test-realtime.mjs
 
+# Full Next.js HTTP initialization followed by a real WebSocket handshake
+npm run build
+node --test scratch/test-realtime-next.mjs
+
 # Regression checks for delayed canvas loading, speech timing, buffering, and cancellation
 node --experimental-strip-types --test scratch/test-playback-sync.mjs
 

@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { createLessonWithGroq } from "@/lib/groq";
-import { GroqFreeLimitError, type GroqCallOptions } from "@/lib/groq-pool";
+import { getGroqQuotaSnapshot, GroqFreeLimitError, type GroqCallOptions } from "@/lib/groq-pool";
 import { resolveProviderCredentials } from "@/lib/provider-credentials";
 import { providerEventStream } from "@/lib/provider-response";
 import { researchQuestion } from "@/lib/research";
@@ -24,6 +24,9 @@ export async function POST(request: NextRequest) {
 
   return providerEventStream(request, async (send, signal) => {
     send("status", { stage: "understanding", message: "Understanding the question" });
+    const quota = await getGroqQuotaSnapshot(input.sessionId, input.preferredGroqKeyId);
+    send("provider_status", quota);
+    if (quota.allUnavailable) throw new GroqFreeLimitError(quota);
     const credentials = await resolveProviderCredentials();
     signal.throwIfAborted();
     if (!credentials.groqKeys.length) {

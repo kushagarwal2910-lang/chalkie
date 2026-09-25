@@ -1,7 +1,7 @@
 import type { NextRequest } from "next/server";
 import { z } from "zod";
 import { createFollowUpWithGroq } from "@/lib/groq";
-import type { GroqCallOptions } from "@/lib/groq-pool";
+import { getGroqQuotaSnapshot, GroqFreeLimitError, type GroqCallOptions } from "@/lib/groq-pool";
 import { providerEventStream } from "@/lib/provider-response";
 import { lessonPlanSchema } from "@/lib/lesson-schema";
 import { retrieveSessionContext } from "@/lib/research";
@@ -21,6 +21,9 @@ export async function POST(request: NextRequest) {
   catch { return Response.json({ error: "Invalid follow-up request", code: "INVALID_REQUEST", message: "The follow-up request or current lesson is invalid.", retryable: false }, { status: 400 }); }
 
   return providerEventStream(request, async (send, signal) => {
+    const quota = await getGroqQuotaSnapshot(input.sessionId, input.preferredGroqKeyId);
+    send("provider_status", quota);
+    if (quota.allUnavailable) throw new GroqFreeLimitError(quota);
     const groqOptions: GroqCallOptions = {
       sessionId: input.sessionId,
       preferredKeyId: input.preferredGroqKeyId,

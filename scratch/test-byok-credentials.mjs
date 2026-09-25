@@ -89,3 +89,17 @@ test("tampered cookie requests key reentry; deleting removes all personal creden
   assert.equal((await route.DELETE(request())).status, 200);
   assert.equal(state.value, undefined);
 });
+
+test("public Host permits same-origin BYOK behind an internal custom-server hostname", async () => {
+  reset();
+  const sameSite = request({ groqKeys: [keyA] });
+  sameSite.headers.set("host", "chalkie.example");
+  sameSite.nextUrl = new URL("http://0.0.0.0:10000/api/byok");
+  assert.equal((await route.POST(sameSite)).status, 200);
+  const original = state.value;
+  const crossSite = request({ groqKeys: [keyB] }, "https://other.example");
+  crossSite.headers.set("host", "chalkie.example");
+  crossSite.nextUrl = sameSite.nextUrl;
+  assert.equal((await route.POST(crossSite)).status, 403);
+  assert.equal(state.value, original);
+});

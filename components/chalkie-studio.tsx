@@ -910,10 +910,10 @@ export function ChalkieStudio() {
           <div className="flex items-center gap-1.5 sm:gap-2">
             <div
               className="hidden items-center gap-1.5 rounded-full px-2 py-1 text-xs text-[#9ca3af] lg:flex"
-              title={connectionStatus === "realtime" ? "Realtime connected" : "Connecting…"}
+              title={connectionStatus === "realtime" ? "Realtime connected" : "Connecting to realtime updates; lessons remain available"}
             >
-              <span className="live-pulse h-1.5 w-1.5 rounded-full bg-[#34d399]" />
-              <span className="text-[11px] font-medium text-[#34d399]/90">Live</span>
+              <span className={`h-1.5 w-1.5 rounded-full ${connectionStatus === "realtime" ? "live-pulse bg-[#34d399]" : "bg-[#e49b3f]"}`} />
+              <span className={`text-[11px] font-medium ${connectionStatus === "realtime" ? "text-[#34d399]/90" : "text-[#e49b3f]"}`}>{connectionStatus === "realtime" ? "Live" : connectionStatus === "connecting" ? "Connecting" : "Reconnecting"}</span>
             </div>
 
             <ProviderControl className="hidden sm:inline-flex" />
