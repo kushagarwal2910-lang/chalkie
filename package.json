@@ -10,7 +10,8 @@
     "dev:next": "next dev",
     "dev:vercel": "vercel dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.mjs",
+    "start:next": "next start",
     "lint": "eslint . --ignore-pattern .next",
     "typecheck": "tsc --noEmit"
   },

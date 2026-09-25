@@ -84,10 +84,13 @@ function getRelativeLuminance(hex: string): number {
  */
 function getContrastingTextColor(fillColorNameOrHex: string): string {
   if (!fillColorNameOrHex || fillColorNameOrHex === "none") return "#f8fafc";
+  const name = fillColorNameOrHex.toLowerCase();
+  if (name === "yellow" || name === "white" || name === "#ffffff" || name === "#facc15" || name === "#fef08a") return "#090d16";
+  if (name === "cyan" || name === "#38bdf8") return "#090d16";
   const hex = palette[fillColorNameOrHex] || fillColorNameOrHex;
-  if (!hex.startsWith("#")) return "#090d16";
+  if (!hex.startsWith("#")) return "#f8fafc";
   const lum = getRelativeLuminance(hex);
-  return lum > 0.28 ? "#090d16" : "#f8fafc";
+  return lum > 0.52 ? "#090d16" : "#f8fafc";
 }
 
 function safeParts(value: string): VisualPart[] {
@@ -122,10 +125,32 @@ function oscillatingPath(x: number, y: number, width: number, height: number, cy
   return `M ${points.join(" L ")}`;
 }
 
-function axisLabels(data: string) {
-  const pieces = data.split("|");
-  const rawX = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "").trim() || "Horizontal value";
-  const rawY = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "").trim() || "Vertical value";
+function axisLabels(data: string, objectLabel = "") {
+  let rawX = "";
+  let rawY = "";
+  if (data.includes("|")) {
+    const pieces = data.split("|");
+    rawX = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "").trim() || pieces[0] || "";
+    rawY = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "").trim() || pieces[1] || "";
+  } else if (/vs\.?/i.test(data)) {
+    const [yPart, xPart] = data.split(/vs\.?/i);
+    rawY = yPart?.trim() || "";
+    rawX = xPart?.trim() || "";
+  } else if (data.includes(",")) {
+    const [xPart, yPart] = data.split(",");
+    rawX = xPart?.replace(/^\s*x\s*:/i, "").trim() || "";
+    rawY = yPart?.replace(/^\s*y\s*:/i, "").trim() || "";
+  }
+
+  if ((!rawX || rawX === "Horizontal value") && /vs\.?/i.test(objectLabel)) {
+    const [yPart, xPart] = objectLabel.split(/vs\.?/i);
+    if (!rawY || rawY === "Vertical value") rawY = yPart.replace(/^[:\s\-—]+/, "").trim();
+    rawX = xPart.replace(/^[:\s\-—]+/, "").trim();
+  }
+
+  rawX = rawX || "Time / Input (x)";
+  rawY = rawY || "Value / Output (y)";
+
   return {
     x: formatMathFormula(rawX),
     y: formatMathFormula(rawY),
@@ -134,10 +159,10 @@ function axisLabels(data: string) {
 
 function axisPlot(part: VisualPart) {
   return {
-    left: part.x + 38,
-    right: part.x + part.width - 14,
-    top: part.y + 14,
-    bottom: part.y + part.height - 34,
+    left: part.x + 48,
+    right: part.x + part.width - 24,
+    top: part.y + 24,
+    bottom: part.y + part.height - 40,
   };
 }
 
@@ -402,10 +427,25 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
     : isBelow
       ? shape.props.h - estimatedPillH / 2 - 2
       : shape.props.h / 2;
-  const labelX = shape.props.labelPlacement === "left" ? Math.min(60, shape.props.w / 4) : shape.props.labelPlacement === "right" ? Math.max(shape.props.w - 60, (shape.props.w * 3) / 4) : shape.props.w / 2;
+  let maxPartX = shape.props.w;
+  let maxPartY = shape.props.h;
+  for (const part of parts) {
+    if (part.x + (part.width || 0) > maxPartX) maxPartX = part.x + (part.width || 0);
+    if (part.y + (part.height || 0) > maxPartY) maxPartY = part.y + (part.height || 0);
+    if ((part.type === "polygon" || part.type === "polyline") && part.data) {
+      const coords = part.data.trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+      for (let i = 0; i < coords.length; i += 2) {
+        if (coords[i] > maxPartX) maxPartX = coords[i] + 12;
+        if (coords[i + 1] > maxPartY) maxPartY = coords[i + 1] + 12;
+      }
+    }
+  }
+  const fitScale = Math.min(1.0, shape.props.w / Math.max(1, maxPartX), shape.props.h / Math.max(1, maxPartY));
+  const designW = shape.props.w;
+  const designH = shape.props.h;
 
   return (
-    <SVGContainer width={shape.props.w} height={shape.props.h} viewBox={`0 0 ${shape.props.w} ${shape.props.h}`} preserveAspectRatio="none">
+    <SVGContainer width={shape.props.w} height={shape.props.h} viewBox={`0 0 ${designW} ${designH}`}>
       <defs>
         {/* Directional Vector Markers */}
         <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
@@ -468,9 +508,9 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         </linearGradient>
 
         <clipPath id={objectClipId}>
-          <rect x="0" y="0" width={Math.max(0, shape.props.w)} height={Math.max(0, shape.props.h)} rx="12" />
+          <rect x="0" y="0" width={designW} height={designH} rx="12" />
         </clipPath>
-        {plot && <clipPath id={plotClipId}><rect x={plot.left} y={plot.top} width={Math.max(0, plot.right - plot.left)} height={Math.max(0, plot.bottom - plot.top)} /></clipPath>}
+        {plot && <clipPath id={plotClipId}><rect x={plot.left - 4} y={plot.top - 4} width={Math.max(0, plot.right - plot.left + 8)} height={Math.max(0, plot.bottom - plot.top + 8)} /></clipPath>}
 
         {/* Dynamic Keyframe Animations for Physics, Astronomy & Data Flow */}
         <style>{`
@@ -512,9 +552,9 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
       </defs>
 
       <g className="chalk-shape-container">
-        {renderObjectChassis(shape.props.role, shape.props.w, shape.props.h, Boolean(axesPart), parts.length > 0, uid, shape.props.label)}
+        {renderObjectChassis(shape.props.role, designW, designH, Boolean(axesPart), parts.length > 0, uid, shape.props.label)}
 
-        <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`}>
+        <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`} transform={fitScale < 1 ? `scale(${fitScale})` : undefined}>
         {parts.map((part, index) => {
           let rawStroke = palette[part.stroke] ?? palette.ink;
           let rawFill = palette[part.fill] ?? palette.none;
@@ -552,20 +592,49 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             vectorEffect: "non-scaling-stroke" as const,
             strokeLinecap: "round" as const,
             strokeLinejoin: "round" as const,
-            clipPath: plot && part.type !== "axes" && part.type !== "text" ? `url(#${plotClipId})` : undefined,
+            clipPath: plot && part.type !== "axes" && part.type !== "text" && part.data !== "point" ? `url(#${plotClipId})` : undefined,
           };
           const key = `${index}-${part.type}`;
 
           if (part.type === "ellipse") {
+            const isPoint = part.data === "point" || (part.width <= 24 && part.height <= 24);
             const cx = Math.max(4, Math.min(shape.props.w - 4, part.x + part.width / 2));
             const cy = Math.max(4, Math.min(shape.props.h - 4, part.y + part.height / 2));
-            const maxRx = Math.min(cx, shape.props.w - cx);
-            const maxRy = Math.min(cy, shape.props.h - cy);
+
+            if (isPoint) {
+              const ptColor = palette[part.fill] ?? palette[part.stroke] ?? "#38bdf8";
+              return (
+                <g key={key}>
+                  {/* Subtle glowing halo */}
+                  <circle cx={cx} cy={cy} r={8} fill={ptColor} opacity={0.3} filter={`url(#${markerId}-glow)`} />
+                  {/* Crisp central marker point */}
+                  <circle cx={cx} cy={cy} r={4.5} fill={ptColor} stroke="#ffffff" strokeWidth={1.5} />
+                  {part.text && (
+                    <text
+                      x={cx + 8}
+                      y={cy - 8}
+                      fill="#f8fafc"
+                      stroke="#090d16"
+                      strokeWidth="2.5"
+                      paintOrder="stroke"
+                      fontFamily="Inter, ui-sans-serif, system-ui"
+                      fontSize={11}
+                      fontWeight="700"
+                    >
+                      {formatMathFormula(part.text)}
+                    </text>
+                  )}
+                </g>
+              );
+            }
+
+            const maxRx = Math.max(4, Math.min(cx, shape.props.w - cx));
+            const maxRy = Math.max(4, Math.min(cy, shape.props.h - cy));
             const rx = Math.max(2, Math.min(maxRx, part.width / 2));
             const ry = Math.max(2, Math.min(maxRy, part.height / 2));
-            const isCircle = Math.abs(rx - ry) / Math.max(rx, ry) < 0.28 || part.data === "circle";
-            const finalRx = isCircle ? Math.min(rx, ry) : rx;
-            const finalRy = isCircle ? Math.min(rx, ry) : ry;
+            const isCircle = part.data === "circle" || Math.abs(rx - ry) <= 1.5;
+            const finalRx = isCircle ? (rx + ry) / 2 : rx;
+            const finalRy = isCircle ? (rx + ry) / 2 : ry;
 
             // Celestial Body Detection (Earth, Moon, Sun)
             const textLower = (part.text || "").toLowerCase().trim();
@@ -615,20 +684,42 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           }
 
           if (part.type === "rect") {
-            const rx = Math.max(0, Math.min(shape.props.w - 4, part.x));
-            const ry = Math.max(0, Math.min(shape.props.h - 4, part.y));
-            const rw = Math.max(4, Math.min(shape.props.w - rx, part.width));
-            const rh = Math.max(4, Math.min(shape.props.h - ry, part.height));
+            const rx = Math.max(0, part.x);
+            const ry = Math.max(0, part.y);
+            const rw = Math.max(4, part.width);
+            const rh = Math.max(4, part.height);
+            const hasText = Boolean(part.text && part.text.trim());
+            const textFill = getContrastingTextColor(rawFill !== "none" ? rawFill : part.fill);
+            const cleanText = formatMathFormula(part.text || "");
+            const fontSize = Math.max(9.5, Math.min(13, Math.floor(rh * 0.44), Math.floor((rw - 8) / Math.max(1, cleanText.length * 0.58))));
             return (
-              <rect
-                key={key}
-                {...common}
-                x={rx}
-                y={ry}
-                width={rw}
-                height={rh}
-                rx={Math.min(8, rw / 6, rh / 6)}
-              />
+              <g key={key}>
+                <rect
+                  {...common}
+                  x={rx}
+                  y={ry}
+                  width={rw}
+                  height={rh}
+                  rx={Math.min(8, rw / 6, rh / 6)}
+                />
+                {hasText && (
+                  <text
+                    x={rx + rw / 2}
+                    y={rawFill === "none" && rh > 80 ? ry + 14 : ry + rh / 2}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill={textFill}
+                    stroke={textFill === "#f8fafc" ? "#090d16" : "none"}
+                    strokeWidth={textFill === "#f8fafc" ? "2.5" : "0"}
+                    paintOrder="stroke"
+                    fontFamily="Inter, ui-sans-serif, system-ui"
+                    fontSize={fontSize}
+                    fontWeight="700"
+                  >
+                    {cleanText}
+                  </text>
+                )}
+              </g>
             );
           }
 
@@ -658,8 +749,11 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
                     x={part.x + part.width / 2}
                     y={part.y + part.height / 2 - 8}
                     fill={textPalette[part.stroke] || "#f8fafc"}
+                    stroke="#090d16"
+                    strokeWidth="3.5"
+                    paintOrder="stroke"
                     fontFamily={isMathematicalFormula(part.text) ? "'KaTeX_Main', 'Cambria Math', serif" : "Inter, ui-sans-serif, system-ui"}
-                    fontSize={12}
+                    fontSize={11.5}
                     fontWeight="700"
                     textAnchor="middle"
                     dominantBaseline="middle"
@@ -735,18 +829,118 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
 
           if (part.type === "axes") {
             const bounds = axisPlot(part);
-            const labels = axisLabels(part.data);
+            const labels = axisLabels(part.data, shape.props.label);
             const axisColor = palette[part.stroke] ?? palette.ink;
             const tickXs = [0.25, 0.5, 0.75].map((ratio) => bounds.left + (bounds.right - bounds.left) * ratio);
             const tickYs = [0.25, 0.5, 0.75].map((ratio) => bounds.bottom - (bounds.bottom - bounds.top) * ratio);
             return (
-              <g key={key} {...common} fill="none">
-                <line x1={bounds.left} y1={bounds.bottom} x2={bounds.right} y2={bounds.bottom} markerEnd={`url(#${markerId})`} />
-                <line x1={bounds.left} y1={bounds.bottom} x2={bounds.left} y2={bounds.top} markerEnd={`url(#${markerId})`} />
-                {tickXs.map((x) => <line key={`x-${x}`} x1={x} y1={bounds.bottom - 4} x2={x} y2={bounds.bottom + 4} opacity="0.45" />)}
-                {tickYs.map((y) => <line key={`y-${y}`} x1={bounds.left - 4} y1={y} x2={bounds.left + 4} y2={y} opacity="0.45" />)}
-                <text x={(bounds.left + bounds.right) / 2} y={part.y + part.height - 9} fill={axisColor} stroke="#090d16" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700">{labels.x}</text>
-                <text x={part.x + 11} y={(bounds.top + bounds.bottom) / 2} fill={axisColor} stroke="#090d16" strokeWidth="3" paintOrder="stroke" textAnchor="middle" dominantBaseline="middle" fontFamily="Inter, ui-sans-serif, system-ui" fontSize="12" fontWeight="700" transform={`rotate(-90 ${part.x + 11} ${(bounds.top + bounds.bottom) / 2})`}>{labels.y}</text>
+              <g key={key} fill="none">
+                {/* Subtle Coordinate Grid Lines */}
+                {tickYs.map((y, idx) => (
+                  <line
+                    key={`grid-y-${idx}`}
+                    x1={bounds.left}
+                    y1={y}
+                    x2={bounds.right}
+                    y2={y}
+                    stroke="#334155"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                    opacity={0.35}
+                  />
+                ))}
+                {tickXs.map((x, idx) => (
+                  <line
+                    key={`grid-x-${idx}`}
+                    x1={x}
+                    y1={bounds.top}
+                    x2={x}
+                    y2={bounds.bottom}
+                    stroke="#334155"
+                    strokeWidth={1}
+                    strokeDasharray="3 3"
+                    opacity={0.35}
+                  />
+                ))}
+
+                {/* X and Y Axis Lines with Directional Arrowheads */}
+                <line
+                  x1={bounds.left}
+                  y1={bounds.bottom}
+                  x2={bounds.right}
+                  y2={bounds.bottom}
+                  stroke={axisColor}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  markerEnd={`url(#${markerId})`}
+                />
+                <line
+                  x1={bounds.left}
+                  y1={bounds.bottom}
+                  x2={bounds.left}
+                  y2={bounds.top}
+                  stroke={axisColor}
+                  strokeWidth={2}
+                  strokeLinecap="round"
+                  markerEnd={`url(#${markerId})`}
+                />
+
+                {/* Ticks on X and Y Axes */}
+                {tickXs.map((x) => (
+                  <line key={`tick-x-${x}`} x1={x} y1={bounds.bottom - 4} x2={x} y2={bounds.bottom + 4} stroke={axisColor} strokeWidth={1.5} opacity={0.65} />
+                ))}
+                {tickYs.map((y) => (
+                  <line key={`tick-y-${y}`} x1={bounds.left - 4} y1={y} x2={bounds.left + 4} y2={y} stroke={axisColor} strokeWidth={1.5} opacity={0.65} />
+                ))}
+
+                {/* Origin Indicator '0' */}
+                <text
+                  x={bounds.left - 10}
+                  y={bounds.bottom + 12}
+                  fill="#94a3b8"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontFamily="Inter, ui-sans-serif, system-ui"
+                  fontSize="11"
+                  fontWeight="600"
+                >
+                  0
+                </text>
+
+                {/* X-Axis Label (Centered beneath the horizontal axis) */}
+                <text
+                  x={(bounds.left + bounds.right) / 2}
+                  y={part.y + part.height - 12}
+                  fill={axisColor}
+                  stroke="#090d16"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontFamily="Inter, ui-sans-serif, system-ui"
+                  fontSize="12"
+                  fontWeight="700"
+                >
+                  {labels.x}
+                </text>
+
+                {/* Y-Axis Label (Safely positioned with ample left margin and dark outline) */}
+                <text
+                  x={part.x + 18}
+                  y={(bounds.top + bounds.bottom) / 2}
+                  fill={axisColor}
+                  stroke="#090d16"
+                  strokeWidth="3"
+                  paintOrder="stroke"
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontFamily="Inter, ui-sans-serif, system-ui"
+                  fontSize="12"
+                  fontWeight="700"
+                  transform={`rotate(-90 ${part.x + 18} ${(bounds.top + bounds.bottom) / 2})`}
+                >
+                  {labels.y}
+                </text>
               </g>
             );
           }
@@ -754,9 +948,13 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           if (part.type === "orbit") {
             const effectiveW = part.width > 60 ? part.width : Math.max(120, shape.props.w - 30);
             const effectiveH = part.height > 60 ? part.height : Math.max(100, shape.props.h - 30);
-            const cx = part.x > 0 ? part.x + part.width / 2 : shape.props.w / 2;
-            const cy = part.y > 0 ? part.y + part.height / 2 : shape.props.h / 2;
-            const radius = Math.max(42, Math.min(effectiveW, effectiveH) / 2 - 14);
+            const cx = (part.x > 0 && Math.abs(part.x + part.width / 2 - shape.props.w / 2) > 30)
+              ? part.x + part.width / 2
+              : shape.props.w / 2;
+            const cy = (part.y > 0 && Math.abs(part.y + part.height / 2 - shape.props.h / 2) > 30)
+              ? part.y + part.height / 2
+              : shape.props.h / 2;
+            const radius = Math.max(24, Math.min(effectiveW, effectiveH) / 2 - 10);
             const dataStr = (part.data || "").toLowerCase().trim();
 
             // ONLY render the complex Moon-Earth perpetual free-fall simulation when explicitly targeted with "celestial-moon-earth"
@@ -995,7 +1193,31 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             );
           }
 
-          if (part.type === "polygon") return <polygon key={key} {...common} points={part.data} />;
+          if (part.type === "polygon") {
+            const hasText = Boolean(part.text && part.text.trim());
+            return (
+              <g key={key}>
+                <polygon {...common} points={part.data} />
+                {hasText && (
+                  <text
+                    x={part.x ? part.x + (part.width || 0) / 2 : designW / 2}
+                    y={part.y ? part.y + 24 : 26}
+                    textAnchor="middle"
+                    dominantBaseline="middle"
+                    fill="#f8fafc"
+                    stroke="#090d16"
+                    strokeWidth="3"
+                    paintOrder="stroke"
+                    fontFamily="Inter, ui-sans-serif, system-ui"
+                    fontSize={12}
+                    fontWeight="700"
+                  >
+                    {formatMathFormula(part.text)}
+                  </text>
+                )}
+              </g>
+            );
+          }
           if (part.type === "polyline") return <polyline key={key} {...common} points={part.data} fill="none" />;
           if (part.type === "path") return <path key={key} {...common} d={part.data} />;
 
@@ -1012,30 +1234,33 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           let textAnchor: "middle" | "start" | "end" = "middle";
 
           if (isFormulaCard) {
-            const textParts = parts.filter((p) => p.type === "text" || Boolean(p.text));
-            const textIdx = textParts.findIndex((p) => p === part);
-            posX = shape.props.w / 2;
-            textAnchor = "middle";
+            const hasCustomLayout = (part.x && part.x > 0) || (part.y && part.y > 0);
+            if (!hasCustomLayout) {
+              const textParts = parts.filter((p) => p.type === "text" || Boolean(p.text));
+              const textIdx = textParts.findIndex((p) => p === part);
+              posX = shape.props.w / 2;
+              textAnchor = "middle";
 
-            if (textParts.length <= 1) {
-              posY = 33 + (shape.props.h - 33) / 2;
-              const availableW = shape.props.w - 32;
-              textFontSize = Math.max(15, Math.min(24, Math.floor(availableW / Math.max(1, cleanText.length * 0.52))));
-            } else {
-              const availableH = shape.props.h - 38;
-              const lineGap = availableH / (textParts.length + 1);
-              posY = 34 + lineGap * (textIdx + 1);
-              textFontSize = textIdx === 0
-                ? Math.max(14, Math.min(20, Math.floor((shape.props.w - 32) / Math.max(1, cleanText.length * 0.52))))
-                : 12;
+              if (textParts.length <= 1) {
+                posY = 33 + (shape.props.h - 33) / 2;
+                const availableW = shape.props.w - 32;
+                textFontSize = Math.max(15, Math.min(24, Math.floor(availableW / Math.max(1, cleanText.length * 0.52))));
+              } else {
+                const availableH = shape.props.h - 38;
+                const lineGap = availableH / (textParts.length + 1);
+                posY = 34 + lineGap * (textIdx + 1);
+                textFontSize = textIdx === 0
+                  ? Math.max(14, Math.min(20, Math.floor((shape.props.w - 32) / Math.max(1, cleanText.length * 0.52))))
+                  : 12;
+              }
             }
           }
 
-          const textColor = isFormulaCard
-            ? "#38bdf8"
-            : (part.fill && part.fill !== "none")
+          const textColor = (part.fill && part.fill !== "none")
             ? (textPalette[part.fill] || palette[part.fill] || "#f8fafc")
-            : (textPalette[part.stroke] || palette[part.stroke] || "#f8fafc");
+            : (part.stroke && part.stroke !== "none")
+            ? (textPalette[part.stroke] || palette[part.stroke] || "#f8fafc")
+            : (isFormulaCard ? "#38bdf8" : "#f8fafc");
 
           return (
             <text
@@ -1091,34 +1316,59 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         if (hasIdenticalPartText) return null;
 
         const isContainer = ["container", "environment", "layer", "field"].includes(shape.props.role);
-        const fontSize = isContainer ? 12 : 11;
+        let fontSize = isContainer ? 12 : 11;
         // Clean display label: remove leading colons, hyphens, or punctuation artifacts
         const displayLabel = formatMathFormula(shape.props.label).replace(/^[:\s\-—]+/, "").trim();
         if (!displayLabel) return null;
 
-        const charWidth = fontSize * 0.58;
-        const pillPadX = 12;
+        const pillPadX = 10;
         const pillPadY = 4;
-        const maxPillW = Math.max(60, shape.props.w - 16);
+        const maxPillW = Math.max(80, shape.props.w - 12);
+
+        // Dynamically auto-scale font size if text is long to prevent premature truncation
+        const estCharW = fontSize * 0.52;
+        if (displayLabel.length * estCharW + pillPadX * 2 > maxPillW) {
+          fontSize = Math.max(9.5, Math.floor((maxPillW - pillPadX * 2) / (displayLabel.length * 0.52)));
+        }
+
+        const charWidth = fontSize * 0.52;
         const desiredW = displayLabel.length * charWidth + pillPadX * 2;
-        const pillW = Math.min(maxPillW, desiredW);
-        const pillH = lines.length > 1 ? fontSize * 2 + pillPadY * 2 + 2 : fontSize + pillPadY * 2;
-        const pillX = Math.max(8, Math.min(shape.props.w - pillW - 8, labelX - pillW / 2));
+        const words = displayLabel.split(/\s+/);
+        let badgeLines: string[] = [displayLabel];
+        if (words.length >= 2 && desiredW > maxPillW) {
+          const mid = Math.ceil(words.length / 2);
+          badgeLines = [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+        }
+
+        const isMultiLine = desiredW > maxPillW && badgeLines.length > 1;
+        const line1 = isMultiLine ? badgeLines[0] : (desiredW > maxPillW ? displayLabel.slice(0, Math.max(4, Math.floor((maxPillW - pillPadX * 2) / charWidth) - 1)) + "…" : displayLabel);
+        const line2 = isMultiLine ? badgeLines[1] : null;
+
+        const longestLineLen = Math.max(line1.length, line2 ? line2.length : 0);
+        const pillW = Math.min(maxPillW, Math.max(40, longestLineLen * charWidth + pillPadX * 2));
+        const pillH = isMultiLine ? fontSize * 2 + pillPadY * 2 + 4 : fontSize + pillPadY * 2 + 2;
+        const centerX = shape.props.w / 2;
+        const pillX = Math.max(6, Math.min(shape.props.w - pillW - 6, centerX - pillW / 2));
+
+        const maxPartBottom = parts.length > 0
+          ? Math.max(...parts.map((p) => (p.y || 0) + (p.height || 0)))
+          : 0;
+
+        const hasParts = parts.length > 0;
         const pillY = isContainer
           ? 10
           : isAbove
           ? 6
           : isBelow
-          ? shape.props.h - pillH - 6
+          ? Math.max(6, Math.min(shape.props.h - pillH - 6, maxPartBottom > 0 && maxPartBottom + pillH + 6 <= shape.props.h ? maxPartBottom + 4 : shape.props.h - pillH - 6))
+          : hasParts
+          ? (maxPartBottom + pillH + 6 <= shape.props.h ? maxPartBottom + 4 : Math.max(6, shape.props.h - pillH - 6))
           : (shape.props.h - pillH) / 2;
-        const bgFill = "#181b29";
-        const bgOpacity = 0.94;
-        const textFill = "#f8fafc";
-        const strokeColor = "#333c54";
 
-        const textToDisplay = desiredW > maxPillW
-          ? displayLabel.slice(0, Math.max(3, Math.floor((maxPillW - pillPadX * 2) / charWidth) - 1)) + "…"
-          : displayLabel;
+        const bgFill = "#0c0e18";
+        const bgOpacity = 0.96;
+        const textFill = "#f8fafc";
+        const strokeColor = "#2d3748";
 
         return (
           <g>
@@ -1127,26 +1377,57 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
               y={pillY}
               width={pillW}
               height={pillH}
-              rx={pillH / 2}
+              rx={Math.min(pillH / 2, 10)}
               fill={bgFill}
               fillOpacity={bgOpacity}
               stroke={strokeColor}
               strokeWidth={1}
               filter={`url(#${markerId}-shadow)`}
             />
-            <text
-              x={pillX + pillW / 2}
-              y={pillY + pillH / 2}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fill={textFill}
-              fontFamily="Inter, ui-sans-serif, system-ui"
-              fontSize={fontSize}
-              fontWeight="700"
-              letterSpacing="-0.01em"
-            >
-              {textToDisplay}
-            </text>
+            {isMultiLine && line2 ? (
+              <>
+                <text
+                  x={pillX + pillW / 2}
+                  y={pillY + fontSize * 0.7 + pillPadY}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill={textFill}
+                  fontFamily="Inter, ui-sans-serif, system-ui"
+                  fontSize={fontSize}
+                  fontWeight="700"
+                  letterSpacing="-0.01em"
+                >
+                  {line1}
+                </text>
+                <text
+                  x={pillX + pillW / 2}
+                  y={pillY + fontSize * 1.8 + pillPadY + 1}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fill={textFill}
+                  fontFamily="Inter, ui-sans-serif, system-ui"
+                  fontSize={fontSize}
+                  fontWeight="700"
+                  letterSpacing="-0.01em"
+                >
+                  {line2}
+                </text>
+              </>
+            ) : (
+              <text
+                x={pillX + pillW / 2}
+                y={pillY + pillH / 2}
+                textAnchor="middle"
+                dominantBaseline="middle"
+                fill={textFill}
+                fontFamily="Inter, ui-sans-serif, system-ui"
+                fontSize={fontSize}
+                fontWeight="700"
+                letterSpacing="-0.01em"
+              >
+                {line1}
+              </text>
+            )}
           </g>
         );
       })()}

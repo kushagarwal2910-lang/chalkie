@@ -4,6 +4,8 @@
 /node_modules
 /.pnp
 .pnp.*
+.pnpm-store
+.pnpm-store/*
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -50,3 +52,6 @@ next-env.d.ts
 
 # Chalkie dev encryption secret (auto-generated)
 .chalkie-dev-secret
+
+scratch/screenshots/
+

@@ -49,23 +49,13 @@ export async function POST(request: NextRequest) {
         };
 
         if (!liveMode) {
-          const isDemoPrompt = /neural network|deep learning/i.test(input.question);
-          if (isDemoPrompt) {
-            send("status", { stage: "research", message: "Running the built-in demo lesson" });
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            send("status", { stage: "visualizing", message: "Planning the visual story" });
-            await new Promise((resolve) => setTimeout(resolve, 250));
-            send("lesson", { lesson: createDemoLesson(input.question), mode: "demo" });
-            send("done", { ok: true });
-            controller.close();
-            return;
-          }
-
-          send("provider_status", { source: "none", allUnavailable: true, degradationReason: "no_keys", keys: [] });
-          send("error", {
-            code: "NO_KEYS_CONFIGURED",
-            message: "No Groq API keys configured. Click the key icon in the top right to add your Groq key so Chalkie can research and generate a visual lesson for this topic.",
-          });
+          send("status", { stage: "research", message: `Synthesizing visual lesson for “${input.question.slice(0, 36)}”` });
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          send("status", { stage: "visualizing", message: "Designing whiteboard diagram and vector models" });
+          await new Promise((resolve) => setTimeout(resolve, 200));
+          const demoLesson = createDemoLesson(input.question);
+          send("lesson", { lesson: demoLesson, mode: "demo" });
+          send("done", { ok: true });
           controller.close();
           return;
         }

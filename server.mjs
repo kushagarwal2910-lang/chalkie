@@ -4,7 +4,8 @@ import { WebSocketServer, WebSocket } from "ws";
 
 const port = Number.parseInt(process.env.PORT || "3000", 10);
 const dev = process.env.NODE_ENV !== "production";
-const app = next({ dev, hostname: "localhost", port });
+const hostname = process.env.HOSTNAME || "0.0.0.0";
+const app = next({ dev, hostname, port });
 
 await app.prepare();
 
@@ -62,6 +63,6 @@ server.on("upgrade", (request, socket, head) => {
   void handleNextUpgrade(request, socket, head).catch(() => socket.destroy());
 });
 
-server.listen(port, () => {
-  console.log(`> Chalkie ready at http://localhost:${port} (${dev ? "development" : "production"}, WebSocket enabled)`);
+server.listen(port, "0.0.0.0", () => {
+  console.log(`> Chalkie ready on port ${port} (${dev ? "development" : "production"}, WebSocket enabled)`);
 });

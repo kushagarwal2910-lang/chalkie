@@ -1,7 +1,7 @@
+@import url("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css");
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
-@import url("https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css");
 
 :root {
   --background: #090a0f;
@@ -67,6 +67,24 @@ button { color: inherit; }
 .tldraw-shell .tlui-layout__bottom { z-index: 10; }
 .tldraw-shell.is-presenting .tlui-layout__top,
 .tldraw-shell.is-presenting .tlui-layout__bottom { opacity: 0; pointer-events: none; transition: opacity 180ms ease; }
+
+/* Tldraw Arrow Label Polish: sleek, single-line, crystal-clear typography */
+.tl-text-label {
+  white-space: nowrap !important;
+  overflow: visible !important;
+}
+.tl-text-label * {
+  white-space: nowrap !important;
+  word-break: normal !important;
+  overflow: visible !important;
+}
+.tl-text-label .tl-text-label__inner {
+  width: auto !important;
+  min-width: unset !important;
+  max-width: none !important;
+  font-size: 13px !important;
+  line-height: 18px !important;
+}
 
 @media (max-width: 980px) {
   body { overflow: auto; }

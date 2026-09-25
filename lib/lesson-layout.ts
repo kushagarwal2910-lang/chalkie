@@ -1,5 +1,5 @@
 import type { LessonPlan, VisualObject, VisualPart } from "./lesson-schema";
-import { formatMathFormula } from "./math-formatter";
+import { formatMathFormula } from "./math-formatter.ts";
 
 const CANVAS_WIDTH = 1280;
 const CANVAS_HEIGHT = 720;
@@ -16,15 +16,34 @@ const clamp = (value: number, min: number, max: number) => Math.min(max, Math.ma
 const safeId = (value: string, fallback: string) => value.trim().replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 56) || fallback;
 
 function cleanAxisLabel(value: string, fallback: string) {
-  const label = value.replace(/[<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 32);
+  const label = value.replace(/[<>|]/g, "").replace(/\s+/g, " ").trim().slice(0, 36);
   return label || fallback;
 }
 
-function sanitizeAxesData(value: string) {
-  const pieces = value.split("|");
-  const x = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "") ?? "Horizontal value";
-  const y = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "") ?? "Vertical value";
-  return `x:${cleanAxisLabel(x, "Horizontal value")}|y:${cleanAxisLabel(y, "Vertical value")}`;
+function sanitizeAxesData(value: string, fallbackX = "Time (t)", fallbackY = "Value (y)") {
+  if (!value) return `x:${fallbackX}|y:${fallbackY}`;
+  const clean = value.replace(/[<>]/g, "").trim();
+  let x = "";
+  let y = "";
+
+  if (clean.includes("|")) {
+    const pieces = clean.split("|");
+    x = pieces.find((piece) => /^\s*x\s*:/i.test(piece))?.replace(/^\s*x\s*:\s*/i, "") || pieces[0] || fallbackX;
+    y = pieces.find((piece) => /^\s*y\s*:/i.test(piece))?.replace(/^\s*y\s*:\s*/i, "") || pieces[1] || fallbackY;
+  } else if (/vs\.?/i.test(clean)) {
+    const [yPart, xPart] = clean.split(/vs\.?/i);
+    y = yPart?.trim() || fallbackY;
+    x = xPart?.trim() || fallbackX;
+  } else if (clean.includes(",")) {
+    const [xPart, yPart] = clean.split(",");
+    x = xPart?.replace(/^\s*x\s*:/i, "").trim() || fallbackX;
+    y = yPart?.replace(/^\s*y\s*:/i, "").trim() || fallbackY;
+  } else {
+    x = clean || fallbackX;
+    y = fallbackY;
+  }
+
+  return `x:${cleanAxisLabel(x, fallbackX)}|y:${cleanAxisLabel(y, fallbackY)}`;
 }
 
 function sanitizePoints(value: string, bounds: Bounds) {
@@ -38,10 +57,10 @@ function sanitizePoints(value: string, bounds: Bounds) {
 }
 
 function axisPlotBounds(part: VisualPart, fallback: Bounds): Bounds {
-  const left = clamp(part.x + 38, fallback.minX, fallback.maxX);
-  const right = clamp(part.x + part.width - 14, left + 20, fallback.maxX);
-  const top = clamp(part.y + 14, fallback.minY, fallback.maxY);
-  const bottom = clamp(part.y + part.height - 34, top + 20, fallback.maxY);
+  const left = clamp(part.x + 44, fallback.minX, fallback.maxX);
+  const right = clamp(part.x + part.width - 24, left + 20, fallback.maxX);
+  const top = clamp(part.y + 20, fallback.minY, fallback.maxY);
+  const bottom = clamp(part.y + part.height - 40, top + 20, fallback.maxY);
   return { minX: left, minY: top, maxX: right, maxY: bottom };
 }
 
@@ -107,9 +126,13 @@ function sanitizePart(part: VisualPart, bounds: Bounds): VisualPart {
   const endY = clamp(part.y + Math.max(0, part.height), y, bounds.maxY);
   let width = endX - x;
   let height = endY - y;
-  if ((part.type === "rect" || part.type === "ellipse") && (width <= 4 || height <= 4)) {
+  const isDataPoint = part.type === "ellipse" && (part.data === "point" || (part.width > 0 && part.width <= 20 && part.height > 0 && part.height <= 20));
+  if (!isDataPoint && (part.type === "rect" || part.type === "ellipse") && (width <= 4 || height <= 4)) {
     width = Math.max(width, Math.min(bounds.maxX - bounds.minX, 36));
     height = Math.max(height, Math.min(bounds.maxY - bounds.minY, 28));
+  } else if (isDataPoint) {
+    width = clamp(part.width || 10, 6, 20);
+    height = clamp(part.height || 10, 6, 20);
   }
   let data = "";
   if (part.type === "path") data = pathData.test(part.data) ? part.data : "";
@@ -240,11 +263,17 @@ const detailedVisualRoles = new Set(["subject", "component", "input", "output"])
 
 
 export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
+  if (!Array.isArray(plan.objects)) plan.objects = [];
+  if (!Array.isArray(plan.connections)) plan.connections = [];
+  if (!Array.isArray(plan.segments)) plan.segments = [];
+  if (!Array.isArray(plan.sources)) plan.sources = [];
+
   const qLower = (plan.question || "").toLowerCase();
 
   // 1. Convert any legacy shapeType: "geo" or non-formula "note" to "custom"
   // and enforce minimum dimensions so labels NEVER wrap into "Moo n", "grav ity", etc.
   for (const obj of plan.objects) {
+    if (!Array.isArray(obj.parts)) obj.parts = [];
     // Sanitize label: remove angle brackets, colons, hyphens at start
     obj.label = (obj.label || "").replace(/[<>]/g, "").replace(/^[:\s\-—]+/, "").trim();
 
@@ -447,19 +476,123 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
           { type: "orbit", data: "2", stroke: "slate", strokeWidth: 1.5, width: 180, height: 180, x: (obj.width - 180) / 2, y: (obj.height - 180) / 2, fill: "none", opacity: 0.7, text: "" },
           { type: "orbit", data: "4", stroke: "slate", strokeWidth: 1.5, width: 260, height: 260, x: (obj.width - 260) / 2, y: (obj.height - 260) / 2, fill: "none", opacity: 0.7, text: "" },
         ];
-      } else {
-        // High-fidelity structured chassis: Title badge, accent divider, and dynamic signal indicator
+      } else if (/\b(cas9|endonuclease|crispr|guide\s*rna|grna|pam|protospacer|cleave|dna\s*strand|double\s*helix)\b/i.test(labelLower)) {
+        obj.width = Math.max(300, obj.width);
+        obj.height = Math.max(220, obj.height);
+        const w = obj.width - 24;
+        const h = obj.height - 24;
+        if (/\b(cas9|endonuclease|enzyme|protein)\b/i.test(labelLower)) {
+          obj.parts = [
+            { type: "polygon", data: `20,40 ${w - 40},30 ${w - 10},90 ${w - 30},${h - 20} 30,${h - 10} 10,100`, fill: "violet", stroke: "violet", strokeWidth: 2, opacity: 0.35, text: "Cas9 Endonuclease", x: 12, y: 12, width: w, height: h },
+            { type: "ellipse", x: 40, y: 50, width: 50, height: 50, fill: "violet", stroke: "white", strokeWidth: 1.5, opacity: 0.8, text: "REC Lobe", data: "" },
+            { type: "ellipse", x: w - 90, y: 65, width: 50, height: 50, fill: "blue", stroke: "cyan", strokeWidth: 1.5, opacity: 0.8, text: "NUC Lobe", data: "" },
+            { type: "path", data: `M 35 110 Q ${w / 2} 85 ${w - 35} 115`, fill: "none", stroke: "orange", strokeWidth: 3, opacity: 1, text: "gRNA Scaffold", x: 0, y: 0, width: w, height: h },
+            { type: "arrow", x: w / 2 - 20, y: 100, width: 40, height: 0, fill: "none", stroke: "red", strokeWidth: 2.5, opacity: 1, text: "Cleavage Site (DSB)", data: "cut" },
+          ];
+        } else if (/\b(grna|guide|rna)\b/i.test(labelLower)) {
+          obj.parts = [
+            { type: "wave", x: 16, y: 40, width: w - 32, height: 40, fill: "none", stroke: "yellow", strokeWidth: 3, opacity: 1, text: "20-nt Spacer Sequence", data: "3" },
+            { type: "path", data: `M ${w - 60} 55 C ${w - 20} 20 ${w - 20} 110 ${w - 60} 75`, fill: "none", stroke: "orange", strokeWidth: 2.5, opacity: 1, text: "Hairpin Loop", x: 0, y: 0, width: w, height: h },
+            { type: "rect", x: 24, y: 100, width: w - 48, height: 28, fill: "slate", stroke: "ink", strokeWidth: 1.5, opacity: 0.9, text: "Target Complementarity", data: "" },
+          ];
+        } else {
+          obj.parts = [
+            { type: "line", x: 16, y: 50, width: w - 32, height: 0, fill: "none", stroke: "cyan", strokeWidth: 3, opacity: 1, text: "Target DNA Strand (5' -> 3')", data: "" },
+            { type: "line", x: 16, y: 90, width: w - 32, height: 0, fill: "none", stroke: "blue", strokeWidth: 3, opacity: 1, text: "Non-Target Strand (3' -> 5')", data: "" },
+            { type: "line", x: 50, y: 50, width: 0, height: 40, fill: "none", stroke: "ink", strokeWidth: 1.5, opacity: 0.8, text: "", data: "" },
+            { type: "line", x: 90, y: 50, width: 0, height: 40, fill: "none", stroke: "ink", strokeWidth: 1.5, opacity: 0.8, text: "", data: "" },
+            { type: "line", x: 130, y: 50, width: 0, height: 40, fill: "none", stroke: "ink", strokeWidth: 1.5, opacity: 0.8, text: "", data: "" },
+            { type: "line", x: 170, y: 50, width: 0, height: 40, fill: "none", stroke: "ink", strokeWidth: 1.5, opacity: 0.8, text: "", data: "" },
+            { type: "rect", x: w - 85, y: 40, width: 65, height: 60, fill: "orange", stroke: "yellow", strokeWidth: 2, opacity: 0.4, text: "PAM (5'-NGG)", data: "" },
+          ];
+        }
+      } else if (/\b(hydraulic|brake|caliper|rotor|cylinder|pedal|fluid)\b/i.test(labelLower)) {
+        obj.width = Math.max(280, obj.width);
+        obj.height = Math.max(200, obj.height);
+        const w = obj.width - 24;
+        const h = obj.height - 24;
+        if (/\b(caliper|rotor|disc|pad)\b/i.test(labelLower)) {
+          obj.parts = [
+            { type: "ellipse", x: 30, y: 20, width: 140, height: 140, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 0.85, text: "Brake Disc Rotor", data: "" },
+            { type: "ellipse", x: 80, y: 70, width: 40, height: 40, fill: "none", stroke: "slate", strokeWidth: 1.5, opacity: 0.9, text: "Hub", data: "" },
+            { type: "rect", x: 130, y: 40, width: 80, height: 100, fill: "red", stroke: "orange", strokeWidth: 2, opacity: 0.9, text: "Hydraulic Caliper", data: "" },
+            { type: "rect", x: 120, y: 60, width: 22, height: 60, fill: "orange", stroke: "yellow", strokeWidth: 1.5, opacity: 0.95, text: "Pad", data: "" },
+            { type: "arrow", x: 170, y: 88, width: -30, height: 0, fill: "none", stroke: "yellow", strokeWidth: 2.5, opacity: 1, text: "Fclamp", data: "clamping" },
+          ];
+        } else if (/\b(master\s*cylinder|reservoir|fluid\s*line|piston)\b/i.test(labelLower)) {
+          obj.parts = [
+            { type: "rect", x: 16, y: 16, width: 90, height: 45, fill: "slate", stroke: "cyan", strokeWidth: 2, opacity: 0.8, text: "Brake Fluid Reservoir", data: "" },
+            { type: "rect", x: 16, y: 65, width: w - 32, height: 65, fill: "none", stroke: "ink", strokeWidth: 2, opacity: 1, text: "Master Cylinder Bore", data: "" },
+            { type: "particles", x: 75, y: 72, width: w - 100, height: 50, fill: "cyan", stroke: "blue", strokeWidth: 1.5, opacity: 0.9, text: "Hydraulic Pressure P = F/A", data: "18" },
+            { type: "rect", x: 20, y: 70, width: 45, height: 55, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 1, text: "Piston", data: "" },
+          ];
+        } else {
+          obj.parts = [
+            { type: "polygon", data: "25,15 45,15 35,130 15,130", fill: "slate", stroke: "ink", strokeWidth: 2, opacity: 1, text: "", x: 0, y: 0, width: w, height: h },
+            { type: "ellipse", x: 25, y: 15, width: 20, height: 20, fill: "cyan", stroke: "blue", strokeWidth: 2, opacity: 1, text: "Pivot Pin", data: "" },
+            { type: "rect", x: 8, y: 120, width: 55, height: 22, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 1, text: "Pedal Pad", data: "" },
+            { type: "arrow", x: 70, y: 130, width: -45, height: 0, fill: "none", stroke: "red", strokeWidth: 3, opacity: 1, text: "Driver Effort (Fpedal)", data: "effort" },
+            { type: "arrow", x: 38, y: 70, width: 100, height: 0, fill: "none", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "Pushrod to Cylinder", data: "pushrod" },
+          ];
+        }
+      } else if (/\b(engine|combustion|piston|crankshaft|valve|spark\s*plug)\b/i.test(labelLower)) {
+        obj.width = Math.max(280, obj.width);
+        obj.height = Math.max(260, obj.height);
+        const w = obj.width - 24;
+        const h = obj.height - 24;
         obj.parts = [
-          { type: "rect", x: 8, y: 8, width: obj.width - 16, height: 26, fill: "slate", stroke: "ink", strokeWidth: 1.5, opacity: 0.9, text: obj.label, data: "" },
-          { type: "rect", x: 8, y: 38, width: obj.width - 16, height: Math.max(36, obj.height - 46), fill: "white", stroke: "slate", strokeWidth: 1.5, opacity: 0.95, text: "", data: "" },
-          { type: "wave", x: 16, y: 46, width: obj.width - 32, height: Math.max(20, obj.height - 62), fill: "none", stroke: "cyan", strokeWidth: 2, opacity: 0.85, text: "", data: "3" },
+          { type: "rect", x: 20, y: 20, width: w - 40, height: h - 40, fill: "none", stroke: "slate", strokeWidth: 2.5, opacity: 1, text: "Cylinder Wall", data: "" },
+          { type: "line", x: 45, y: 20, width: 35, height: 25, fill: "none", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "Intake", data: "" },
+          { type: "line", x: w - 80, y: 20, width: 35, height: 25, fill: "none", stroke: "orange", strokeWidth: 2.5, opacity: 1, text: "Exhaust", data: "" },
+          { type: "line", x: w / 2 - 12, y: 10, width: 0, height: 35, fill: "none", stroke: "yellow", strokeWidth: 3, opacity: 1, text: "Spark Plug", data: "" },
+          { type: "wave", x: 40, y: 45, width: w - 80, height: 25, fill: "none", stroke: "yellow", strokeWidth: 2.5, opacity: 0.9, text: "Ignition / Expansion", data: "4" },
+          { type: "rect", x: 30, y: 80, width: w - 60, height: 50, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 1, text: "Piston Head", data: "" },
+          { type: "line", x: w / 2 - 12, y: 130, width: 25, height: 70, fill: "none", stroke: "slate", strokeWidth: 4, opacity: 1, text: "Connecting Rod", data: "" },
+          { type: "ellipse", x: w / 2, y: 195, width: 36, height: 36, fill: "slate", stroke: "cyan", strokeWidth: 2, opacity: 1, text: "Crank", data: "" },
+        ];
+      } else if (/\b(locomotive|pantograph|catenary|wire|train|wagon|bogies?|railway)\b/i.test(labelLower)) {
+        obj.width = Math.max(340, obj.width);
+        obj.height = Math.max(200, obj.height);
+        const w = obj.width - 24;
+        const h = obj.height - 24;
+        if (/\b(pantograph|catenary|wire)\b/i.test(labelLower)) {
+          obj.parts = [
+            { type: "line", x: 10, y: 25, width: w - 20, height: 0, fill: "none", stroke: "yellow", strokeWidth: 3, opacity: 1, text: "Overhead Catenary Wire (25 kV AC)", data: "" },
+            { type: "polyline", data: `50,110 90,60 ${w / 2},30 ${w - 90},60 ${w - 50},110`, fill: "none", stroke: "cyan", strokeWidth: 2.5, opacity: 1, text: "High-Reach Pantograph", x: 0, y: 0, width: w, height: h },
+            { type: "rect", x: w / 2 - 40, y: 23, width: 80, height: 8, fill: "orange", stroke: "yellow", strokeWidth: 1.5, opacity: 1, text: "Carbon Collector Strip", data: "" },
+          ];
+        } else {
+          obj.parts = [
+            { type: "rect", x: 16, y: 30, width: w - 32, height: 85, fill: "slate", stroke: "cyan", strokeWidth: 2, opacity: 0.9, text: obj.label, data: "" },
+            { type: "rect", x: 26, y: 40, width: 60, height: 35, fill: "blue", stroke: "white", strokeWidth: 1.5, opacity: 0.8, text: "Cab Window", data: "" },
+            { type: "ellipse", x: 45, y: 120, width: 40, height: 40, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 1, text: "Bogie 1", data: "" },
+            { type: "ellipse", x: w - 85, y: 120, width: 40, height: 40, fill: "slate", stroke: "white", strokeWidth: 2, opacity: 1, text: "Bogie 2", data: "" },
+            { type: "line", x: 10, y: 155, width: w - 20, height: 0, fill: "none", stroke: "ink", strokeWidth: 3, opacity: 1, text: "Reinforced Steel Track (32.5t Axle Load)", data: "" },
+          ];
+        }
+      } else {
+        // Production-grade technical explainer chassis with status badge, viewport, and dynamic signal
+        obj.width = Math.max(220, obj.width);
+        obj.height = Math.max(140, obj.height);
+        const w = obj.width;
+        const h = obj.height;
+        const isInput = obj.role === "input";
+        const isOutput = obj.role === "output";
+        const accentColor = isInput ? "blue" : isOutput ? "green" : "cyan";
+
+        obj.parts = [
+          { type: "rect", x: 10, y: 10, width: w - 20, height: 28, fill: "slate", stroke: "ink", strokeWidth: 1.5, opacity: 0.9, text: obj.label, data: "" },
+          { type: "rect", x: 10, y: 44, width: w - 20, height: h - 56, fill: "none", stroke: "slate", strokeWidth: 1.5, opacity: 0.8, text: "", data: "" },
+          { type: "wave", x: 22, y: 56, width: w - 44, height: Math.max(20, h - 84), fill: "none", stroke: accentColor, strokeWidth: 2.2, opacity: 0.9, text: `${obj.role.toUpperCase()} STAGE`, data: "3" },
+          { type: "ellipse", x: 4, y: h / 2 - 6, width: 12, height: 12, fill: accentColor, stroke: "white", strokeWidth: 1.5, opacity: 1, text: "", data: "point" },
+          { type: "ellipse", x: w - 16, y: h / 2 - 6, width: 12, height: 12, fill: accentColor, stroke: "white", strokeWidth: 1.5, opacity: 1, text: "", data: "point" },
         ];
       }
     }
   }
 
   // 4. Guarantee 100% teaching coverage without fatal errors
-  const taught = new Set(plan.segments.flatMap((segment) => segment.targetIds));
+  const taught = new Set(plan.segments.flatMap((segment) => segment?.targetIds || []));
   const untaught = plan.objects.filter((object) => detailedVisualRoles.has(object.role) && !taught.has(object.id));
   if (untaught.length && plan.segments.length > 0) {
     const lastSegment = plan.segments[plan.segments.length - 1];
@@ -516,29 +649,178 @@ export function repairAndValidateLessonPlan(plan: LessonPlan): LessonPlan {
     seg.targetIds = validTargets;
   }
 
-  // 5. Quantitative axes check: if quantitative and axes missing, auto-add axes part
-  const strategyRequestsPlot = /\b(graph|plot|chart|coordinate system|x-axis|y-axis|axes)\b/i.test(plan.visualStrategy);
-  const quantitative = plan.diagramType === "quantitative" || strategyRequestsPlot;
-  if (quantitative) {
-    const hasAxesOrChart = plan.objects.some((obj) => obj.shapeType === "custom-chart" || obj.parts.some((p) => p.type === "axes"));
-    if (!hasAxesOrChart && plan.objects.length > 0) {
-      plan.objects[0].parts.unshift({
+  // 5. Quantitative & Graph Harmonization: Guarantee BOTH axes AND plotted curves/points coexist
+  harmonizeGraphObjects(plan);
+
+  return plan;
+}
+
+function harmonizeGraphObjects(plan: LessonPlan): void {
+  const strategyRequestsPlot = /\b(graph|plot|chart|coordinate system|x-axis|y-axis|axes)\b/i.test(plan.visualStrategy || "");
+  const isQuantitativePlan = plan.diagramType === "quantitative" || strategyRequestsPlot;
+
+  for (const obj of (plan.objects || [])) {
+    if (!Array.isArray(obj.parts)) obj.parts = [];
+    const objText = `${obj.id || ""} ${obj.label || ""} ${obj.role || ""}`.toLowerCase();
+    const hasAxes = obj.parts.some((p) => p.type === "axes");
+    const hasPoints = obj.parts.some((p) => p.type === "ellipse" && (p.data === "point" || (p.width <= 24 && p.height <= 24)));
+    const hasCurve = obj.parts.some((p) => p.type === "polyline" || (p.type === "path" && !p.data.includes("M 0 0")));
+    const isExplicitGraph =
+      hasAxes ||
+      obj.shapeType === "custom-chart" ||
+      (obj.role as string) === "graph" ||
+      (obj.role as string) === "chart" ||
+      /\b(graph|plot|curve|chart|coordinate|distribution|vs\.?)\b/i.test(objText) ||
+      (isQuantitativePlan && (hasPoints || hasCurve));
+
+    if (!isExplicitGraph) continue;
+
+    const w = Math.max(360, obj.width);
+    const h = Math.max(240, obj.height);
+    obj.width = w;
+    obj.height = h;
+
+    // 1. Ensure Coordinate Axes Exist
+    let axesPart = obj.parts.find((p) => p.type === "axes");
+    if (!axesPart) {
+      let xLabel = "Time (t)";
+      let yLabel = "Value (y)";
+      if (/vs\.?/i.test(obj.label)) {
+        const [yPart, xPart] = obj.label.split(/vs\.?/i);
+        yLabel = yPart.replace(/^[:\s\-—]+/, "").trim() || yLabel;
+        xLabel = xPart.replace(/^[:\s\-—]+/, "").trim() || xLabel;
+      } else if (/\b(velocity|speed)\b/i.test(objText)) {
+        xLabel = "Time (s)";
+        yLabel = "Velocity (m/s)";
+      } else if (/\b(supply|demand|price|cost)\b/i.test(objText)) {
+        xLabel = "Quantity (Q)";
+        yLabel = "Price (P)";
+      } else if (/\b(loss|cost|error)\b/i.test(objText)) {
+        xLabel = "Epochs / Iterations";
+        yLabel = "Loss / Error";
+      } else if (/\b(voltage|current|ohm)\b/i.test(objText)) {
+        xLabel = "Current (I)";
+        yLabel = "Voltage (V)";
+      } else if (/\b(normal|gaussian|distribution)\b/i.test(objText)) {
+        xLabel = "Standard Deviations (σ)";
+        yLabel = "Probability Density f(x)";
+      }
+
+      axesPart = {
         type: "axes",
         x: 10,
         y: 10,
-        width: Math.max(80, plan.objects[0].width - 20),
-        height: Math.max(60, plan.objects[0].height - 20),
-        data: "x:Time|y:Value",
+        width: w - 20,
+        height: h - 20,
+        data: `x:${xLabel}|y:${yLabel}`,
         text: "",
         fill: "none",
         stroke: "ink",
         strokeWidth: 2,
         opacity: 1,
+      };
+      obj.parts.unshift(axesPart);
+    } else {
+      // Ensure axes has non-empty valid data
+      if (!axesPart.data || axesPart.data === "x:Horizontal value|y:Vertical value" || !axesPart.data.includes("|")) {
+        axesPart.data = sanitizeAxesData(axesPart.data, "Time (t)", "Value (y)");
+      }
+    }
+
+    // 2. Ensure Plotted Curve Exists
+    const currentCurve = obj.parts.find((p) => p.type === "polyline" || (p.type === "path" && !p.data.includes("M 0 0")));
+    const plotLeft = axesPart.x + 48;
+    const plotRight = axesPart.x + axesPart.width - 24;
+    const plotTop = axesPart.y + 24;
+    const plotBottom = axesPart.y + axesPart.height - 40;
+    const plotW = Math.max(60, plotRight - plotLeft);
+    const plotH = Math.max(50, plotBottom - plotTop);
+
+    if (!currentCurve) {
+      // Synthesize a smooth trend curve based on context
+      const isLossCurve = /\b(loss|cost|decay|exponential|decaying)\b/i.test(objText);
+      const isBellCurve = /\b(normal|gaussian|bell|distribution)\b/i.test(objText);
+      const isSigmoid = /\b(sigmoid|logistic|s-curve|activation)\b/i.test(objText);
+
+      const curvePoints: string[] = [];
+      const numPts = 16;
+      for (let i = 0; i <= numPts; i++) {
+        const t = i / numPts;
+        const px = Math.round(plotLeft + t * plotW);
+        let py: number;
+
+        if (isLossCurve) {
+          py = Math.round(plotTop + 10 + (plotH - 20) * Math.exp(-3 * t));
+        } else if (isBellCurve) {
+          const z = (t - 0.5) / 0.18;
+          const g = Math.exp(-0.5 * z * z);
+          py = Math.round(plotBottom - 10 - (plotH - 24) * g);
+        } else if (isSigmoid) {
+          const sig = 1 / (1 + Math.exp(-6 * (t - 0.5)));
+          py = Math.round(plotBottom - 10 - (plotH - 24) * sig);
+        } else {
+          const norm = Math.sin(t * Math.PI * 0.5);
+          py = Math.round(plotBottom - 10 - (plotH - 20) * norm);
+        }
+        curvePoints.push(`${px},${py}`);
+      }
+
+      obj.parts.push({
+        type: "polyline",
+        x: plotLeft,
+        y: plotTop,
+        width: plotW,
+        height: plotH,
+        data: curvePoints.join(" "),
+        text: "",
+        fill: "none",
+        stroke: "cyan",
+        strokeWidth: 3,
+        opacity: 0.95,
       });
     }
-  }
 
-  return plan;
+    // 3. Ensure Key Plotted Data Points Exist
+    const currentPoints = obj.parts.filter((p) => p.type === "ellipse" && (p.data === "point" || (p.width <= 24 && p.height <= 24)));
+    if (currentPoints.length === 0) {
+      const samplePoints: Array<{ t: number; label: string; stroke: VisualPart["stroke"]; fill: VisualPart["fill"] }> = [
+        { t: 0.15, label: "Start", stroke: "cyan", fill: "cyan" },
+        { t: 0.5, label: "Mid", stroke: "yellow", fill: "yellow" },
+        { t: 0.85, label: "Peak", stroke: "green", fill: "green" },
+      ];
+
+      for (const sp of samplePoints) {
+        const px = Math.round(plotLeft + sp.t * plotW);
+        const t = sp.t;
+        let py: number;
+
+        if (/\b(loss|cost|decay)\b/i.test(objText)) {
+          py = Math.round(plotTop + 10 + (plotH - 20) * Math.exp(-3 * t));
+        } else if (/\b(normal|gaussian|bell)\b/i.test(objText)) {
+          const z = (t - 0.5) / 0.18;
+          const g = Math.exp(-0.5 * z * z);
+          py = Math.round(plotBottom - 10 - (plotH - 24) * g);
+        } else {
+          const norm = Math.sin(t * Math.PI * 0.5);
+          py = Math.round(plotBottom - 10 - (plotH - 20) * norm);
+        }
+
+        obj.parts.push({
+          type: "ellipse",
+          x: px - 5,
+          y: py - 5,
+          width: 10,
+          height: 10,
+          data: "point",
+          text: sp.label,
+          fill: sp.fill,
+          stroke: sp.stroke,
+          strokeWidth: 2,
+          opacity: 1,
+        });
+      }
+    }
+  }
 }
 
 export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
@@ -602,6 +884,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   const functional: VisualObject[] = [];
 
   for (const obj of sanitizedObjects) {
+    const isConnected = mappedConnections.some((c) => c.from === obj.id || c.to === obj.id);
     const isFormula =
       obj.role === "formula" ||
       (obj.role === "annotation" && obj.shapeType === "note") ||
@@ -610,7 +893,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
 
     const isContainer = BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame";
 
-    if (isFormula) {
+    if (isFormula && !isConnected) {
       formulas.push(obj);
     } else if (isContainer) {
       containers.push(obj);
@@ -1002,6 +1285,9 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
     let suffix = 2;
     while (ids.has(connectionId) || connectionIds.has(connectionId)) connectionId = `${baseId.slice(0, 50)}-${suffix++}`;
     connectionIds.add(connectionId);
+    idMap.set(connection.id, connectionId);
+    idMap.set(connectionId, connectionId);
+    validUniqueIds.add(connectionId);
 
     const fromObject = unique.find((object) => object.id === from);
     const toObject = unique.find((object) => object.id === to);
@@ -1013,7 +1299,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
       ? { fromAnchor: dx >= 0 ? "right" as const : "left" as const, toAnchor: dx >= 0 ? "left" as const : "right" as const }
       : { fromAnchor: dy >= 0 ? "bottom" as const : "top" as const, toAnchor: dy >= 0 ? "top" as const : "bottom" as const };
 
-    const rawLabel = (connection.label || "").replace(/[<>]/g, "").trim().slice(0, 24);
+    const rawLabel = (connection.label || "").replace(/[<>]/g, "").trim().slice(0, 18);
 
     return [{
       ...connection,
@@ -1029,7 +1315,7 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
 
   const fallbackId = unique[0]?.id;
   const segments = plan.segments.map((segment, index) => {
-    const targetIds = [...new Set(segment.targetIds.map((id) => idMap.get(id)).filter((id): id is string => typeof id === "string" && validUniqueIds.has(id)))];
+    const targetIds = [...new Set(segment.targetIds.map((id) => idMap.get(id) ?? id).filter((id): id is string => typeof id === "string" && validUniqueIds.has(id)))];
     return {
       ...segment,
       id: safeId(segment.id, `segment-${index + 1}`),
@@ -1043,9 +1329,9 @@ export function normalizeLessonLayout(rawPlan: LessonPlan): LessonPlan {
   return {
     ...plan,
     diagramType: quantitative ? "quantitative" : plan.diagramType,
-    title: plan.title.replace(/[<>]/g, "").slice(0, 120),
-    summary: plan.summary.replace(/[<>]/g, "").slice(0, 600),
-    visualStrategy: plan.visualStrategy.replace(/[<>]/g, "").slice(0, 260),
+    title: (plan.title || "").replace(/[<>]/g, "").slice(0, 120),
+    summary: (plan.summary || "").replace(/[<>]/g, "").slice(0, 600),
+    visualStrategy: (plan.visualStrategy || "").replace(/[<>]/g, "").slice(0, 260),
     objects: unique,
     connections,
     segments,

@@ -46,6 +46,7 @@ import { preferredGroqKeyId, ProviderControl, publishProviderStatus, type Provid
 import { ChalkieIcon } from "@/components/chalkie-icon";
 import { VoiceSettingsDialog } from "@/components/voice-settings-dialog";
 import { formatNarrationForSpeech } from "@/lib/speech-formatter";
+import { computeTargetPositions } from "@/lib/target-matcher";
 import {
   getBestAvailableVoice,
   PREFERRED_VOICE_KEY,
@@ -193,6 +194,7 @@ export function ChalkieStudio() {
   const abortRef = useRef<AbortController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const targetTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const playbackRunRef = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -515,6 +517,8 @@ export function ChalkieStudio() {
     audioRef.current = null;
     window.speechSynthesis?.cancel();
     if (stepTimerRef.current) clearTimeout(stepTimerRef.current);
+    targetTimersRef.current.forEach(clearTimeout);
+    targetTimersRef.current = [];
     if (broadcast) sendRealtime({ type: "interrupt" });
   }
 
@@ -525,14 +529,40 @@ export function ChalkieStudio() {
     setIsPlaying(true);
     setVoiceState("thinking");
 
+    // Format narration text for maximum speech clarity, unit expansion, and natural breath pauses
+    const spokenNarration = formatNarrationForSpeech(segment.narration);
+
+    // Precalculate target mention positions in the spoken narration using high-precision linguistic matching
+    const targetPositions = computeTargetPositions(spokenNarration, segment.targetIds, lesson.objects);
+    const initialTargetId = (targetPositions.length > 0 && targetPositions[0].targetId)
+      ? targetPositions[0].targetId
+      : (segment.targetIds[0] ?? null);
+
     const beginVisualTeaching = () => {
       if (run !== playbackRunRef.current) return false;
       setActiveStep(index);
       setVisualSegment({ ...segment });
-      setActiveTargetId(segment.targetIds[0] ?? null);
+      setActiveTargetId(initialTargetId);
       setVoiceState("speaking");
       sendRealtime({ type: "timeline", segmentId: segment.id, targetIds: segment.targetIds, action: segment.action });
       sendRealtime({ type: "pointer", segmentId: segment.id, targetIds: segment.targetIds, action: segment.action });
+
+      // Start target progression timers synchronously when speech/audio actually begins
+      targetTimersRef.current.forEach(clearTimeout);
+      targetTimersRef.current = [];
+      if (targetPositions.length > 1) {
+        for (let i = 1; i < targetPositions.length; i++) {
+          const tp = targetPositions[i];
+          const targetTimeMs = Math.round((tp.charIndex / Math.max(1, spokenNarration.length)) * estimatedDurationMs);
+          const timer = setTimeout(() => {
+            if (playbackRunRef.current === run) {
+              setActiveTargetId(tp.targetId);
+            }
+          }, targetTimeMs);
+          targetTimersRef.current.push(timer);
+        }
+      }
+
       return true;
     };
 
@@ -542,36 +572,15 @@ export function ChalkieStudio() {
       else { setIsPlaying(false); setActiveTargetId(null); setVoiceState("idle"); }
     };
 
-    // Format narration text for maximum speech clarity, unit expansion, and natural breath pauses
-    const spokenNarration = formatNarrationForSpeech(segment.narration);
+    // Clear any previous scheduled target transitions
+    targetTimersRef.current.forEach(clearTimeout);
+    targetTimersRef.current = [];
 
-    // Precalculate target mention positions in the spoken narration
-    const targetPositions: Array<{ charIndex: number; targetId: string }> = [];
-    for (const tId of segment.targetIds) {
-      const obj = lesson.objects.find((o) => o.id === tId);
-      const label = obj?.label?.toLowerCase().trim();
-      if (label && label.length >= 3) {
-        const idx = spokenNarration.toLowerCase().indexOf(label);
-        if (idx !== -1) {
-          targetPositions.push({ charIndex: idx, targetId: tId });
-        }
-      }
-    }
-    targetPositions.sort((a, b) => a.charIndex - b.charIndex);
-
-    // Audio-timed target progression fallback for Groq TTS / device audio
-    if (segment.targetIds.length > 1) {
-      const stepDuration = Math.max(segment.durationMs || 5000, 3000) / segment.targetIds.length;
-      segment.targetIds.forEach((tId, tIdx) => {
-        if (tIdx > 0) {
-          setTimeout(() => {
-            if (playbackRunRef.current === run) {
-              setActiveTargetId(tId);
-            }
-          }, tIdx * stepDuration);
-        }
-      });
-    }
+    // Precise speech duration estimation (13 characters per second normal speech rate)
+    const estimatedDurationMs = Math.max(
+      segment.durationMs || 4500,
+      Math.round((spokenNarration.length / 13) * 1000)
+    );
 
     if (process.env.NEXT_PUBLIC_USE_GROQ_TTS === "true") {
       try {
@@ -605,28 +614,36 @@ export function ChalkieStudio() {
       utterance.rate = !isNaN(rate) && rate >= 0.7 && rate <= 1.3 ? rate : DEFAULT_SPEECH_RATE;
       utterance.pitch = DEFAULT_SPEECH_PITCH;
 
-      // Real-time word boundary synchronization:
+      // Real-time word and sentence boundary synchronization:
       // When the teacher voice speaks the name of a component, the laser pointer instantly glides to it!
       utterance.onboundary = (event) => {
-        if (event.name === "word") {
-          const match = [...targetPositions].reverse().find((tp) => event.charIndex >= tp.charIndex - 8);
+        if (event.name === "word" || event.name === "sentence") {
+          const match = [...targetPositions].reverse().find((tp) => event.charIndex >= tp.charIndex - 2);
           if (match) {
             setActiveTargetId(match.targetId);
-          } else if (segment.targetIds.length > 1) {
-            const ratio = event.charIndex / Math.max(1, spokenNarration.length);
-            const tIdx = Math.min(segment.targetIds.length - 1, Math.floor(ratio * segment.targetIds.length));
-            setActiveTargetId(segment.targetIds[tIdx]);
           }
         }
       };
 
-      utterance.onend = advance;
-      utterance.onerror = advance;
+      const speechStartTime = Date.now();
+      const minStepDuration = Math.max(segment.durationMs || 4500, 3000);
+      const safeAdvance = () => {
+        if (run !== playbackRunRef.current) return;
+        const elapsed = Date.now() - speechStartTime;
+        if (elapsed < minStepDuration) {
+          stepTimerRef.current = setTimeout(advance, minStepDuration - elapsed);
+        } else {
+          advance();
+        }
+      };
+
+      utterance.onend = safeAdvance;
+      utterance.onerror = safeAdvance;
       if (!beginVisualTeaching()) return;
       window.speechSynthesis.speak(utterance);
     } else {
       if (!beginVisualTeaching()) return;
-      stepTimerRef.current = setTimeout(advance, segment.durationMs);
+      stepTimerRef.current = setTimeout(advance, segment.durationMs || 4500);
     }
   }
 
@@ -1244,7 +1261,17 @@ export function ChalkieStudio() {
                 {lesson.segments.map((step, index) => {
                   const state = index < activeStep ? "done" : index === activeStep ? "active" : "next";
                   return (
-                  <button onClick={() => { stopPlayback(false); setActiveStep(index); }} key={step.id} className={`relative flex w-full gap-3 rounded-xl border p-3 text-left transition ${state === "active" ? "border-[#3d336b] bg-[#1c1a2e] shadow-sm" : "border-transparent hover:border-[#222636] hover:bg-[#141622]"}`}>
+                  <button
+                    onClick={() => {
+                      const run = playbackRunRef.current + 1;
+                      playbackRunRef.current = run;
+                      setActiveStep(index);
+                      void playStep(index, run);
+                    }}
+                    key={step.id}
+                    aria-label={`Teach ${step.title}`}
+                    className={`relative flex w-full gap-3 rounded-xl border p-3 text-left transition ${state === "active" ? "border-[#3d336b] bg-[#1c1a2e] shadow-sm" : "border-transparent hover:border-[#222636] hover:bg-[#141622]"}`}
+                  >
                     <span className={`relative z-10 grid h-7 w-7 shrink-0 place-items-center rounded-full text-xs font-semibold ${state === "done" ? "bg-[#0c241c] text-[#34d399]" : state === "active" ? "bg-[#6366f1] text-white" : "border border-[#282d3e] bg-[#141622] text-[#9ca3af]"}`}>
                       {state === "done" ? <Check size={12} /> : index + 1}
                     </span>

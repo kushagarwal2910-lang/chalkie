@@ -260,8 +260,15 @@ function objectShape(object: VisualObject): TLShapePartial {
   } as TLShapePartial;
 }
 
-function anchorPoint(object: VisualObject, anchor: VisualConnection["fromAnchor"]) {
-  const normalized = anchorValue[anchor];
+function safeAnchorNorm(anchor?: string): { x: number; y: number } {
+  if (anchor && anchor in anchorValue) {
+    return anchorValue[anchor as VisualConnection["fromAnchor"]];
+  }
+  return { x: 0.5, y: 0.5 };
+}
+
+function anchorPoint(object: VisualObject, anchor?: VisualConnection["fromAnchor"]) {
+  const normalized = safeAnchorNorm(anchor);
   return { x: object.x + object.width * normalized.x, y: object.y + object.height * normalized.y };
 }
 
@@ -300,12 +307,26 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
   for (const object of visibleObjects) {
     const existingShape = editor.getShape(createShapeId(object.id));
     if (existingShape) {
-      if (existingShape.x !== object.x || existingShape.y !== object.y) {
+      const newShape = objectShape(object);
+      const isPosDiff = Math.abs(existingShape.x - object.x) > 0.5 || Math.abs(existingShape.y - object.y) > 0.5;
+      const currentProps = existingShape.props as any;
+      const newProps = newShape.props as any;
+      const isPropDiff = newProps && (
+        currentProps?.w !== newProps.w ||
+        currentProps?.h !== newProps.h ||
+        currentProps?.label !== newProps.label ||
+        currentProps?.partsJson !== newProps.partsJson
+      );
+      if (isPosDiff || isPropDiff) {
         existingToUpdate.push({
           id: existingShape.id,
           type: existingShape.type,
           x: object.x,
           y: object.y,
+          props: {
+            ...currentProps,
+            ...newProps,
+          },
         });
       }
     } else {
@@ -354,9 +375,17 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
 
   // 4. Directional arrow connections: ONLY visible if BOTH from and to objects are visible!
   const byId = new Map(visibleObjects.map((object) => [object.id, object]));
-  const arrowsToDelete: TLShapeId[] = [];
   const arrowsToCreate: VisualConnection[] = [];
-  const arrowsToUpdate: TLShapePartial[] = [];
+  const arrowsToDelete: TLShapeId[] = [];
+  const validArrowIds = new Set(lesson.connections.map((c) => createShapeId(c.id)));
+
+  // Remove any stale arrow shapes left behind by prior layouts or ID remappings
+  for (const sId of currentShapeIds) {
+    const shape = editor.getShape(sId);
+    if (shape && shape.type === "arrow" && !validArrowIds.has(sId)) {
+      arrowsToDelete.push(sId);
+    }
+  }
 
   for (const connection of lesson.connections) {
     const arrowId = createShapeId(connection.id);
@@ -368,30 +397,12 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
       if (!existing) {
         arrowsToCreate.push(connection);
       } else {
-        const from = byId.get(connection.from)!;
-        const to = byId.get(connection.to)!;
-        const start = anchorPoint(from, connection.fromAnchor);
-        const end = anchorPoint(to, connection.toAnchor);
-        const currentProps = existing.props as any;
-        const dx = end.x - start.x;
-        const dy = end.y - start.y;
-        if (
-          Math.abs(existing.x - start.x) > 1 ||
-          Math.abs(existing.y - start.y) > 1 ||
-          Math.abs((currentProps?.end?.x ?? 0) - dx) > 1 ||
-          Math.abs((currentProps?.end?.y ?? 0) - dy) > 1
-        ) {
-          arrowsToUpdate.push({
-            id: arrowId,
-            type: "arrow",
-            x: start.x,
-            y: start.y,
-            props: {
-              ...currentProps,
-              start: { x: 0, y: 0 },
-              end: { x: dx, y: dy },
-            },
-          });
+        const bindings = editor.getBindingsFromShape(existing, "arrow");
+        const hasStart = bindings.some((b) => (b.props as any).terminal === "start");
+        const hasEnd = bindings.some((b) => (b.props as any).terminal === "end");
+        if (!hasStart || !hasEnd) {
+          arrowsToDelete.push(arrowId);
+          arrowsToCreate.push(connection);
         }
       }
     } else {
@@ -403,10 +414,6 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
 
   if (arrowsToDelete.length) {
     editor.deleteShapes(arrowsToDelete);
-  }
-
-  if (arrowsToUpdate.length) {
-    editor.updateShapes(arrowsToUpdate);
   }
 
   if (arrowsToCreate.length) {
@@ -432,6 +439,23 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
         ? connection.arrowhead
         : "arrow") as any;
 
+      const connColor = (connection.color && tldrawColor[connection.color]) ? tldrawColor[connection.color] : "light-blue";
+
+      const spanDist = Math.hypot(end.x - start.x, end.y - start.y);
+      const rawConnLabel = (connection.label || "").trim();
+      let arrowLabel = "";
+      if (spanDist >= 85 && rawConnLabel) {
+        // Pick concise single action word if full label is too long for the physical span
+        const candidate = (spanDist < 140 && rawConnLabel.includes(" "))
+          ? rawConnLabel.split(/\s+/)[0]
+          : (rawConnLabel.length > 16 ? rawConnLabel.split(/\s+/)[0] : rawConnLabel);
+
+        // Only place text on the arrow line if the physical span is wide enough to avoid vertical character wrapping
+        if (candidate.length * 8.5 <= spanDist - 25) {
+          arrowLabel = candidate;
+        }
+      }
+
       try {
         editor.createShape({
           id: arrowId,
@@ -443,14 +467,14 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
             start: { x: 0, y: 0 },
             end: { x: end.x - start.x, y: end.y - start.y },
             bend: connection.route === "straight" ? 0 : connection.bend,
-            color: (connection.color && tldrawColor[connection.color]) ? tldrawColor[connection.color] : "light-blue",
-            size: "m",
+            color: connColor,
+            size: "s",
             dash: connection.route === "curve" ? "draw" : "solid",
             fill: "none",
             arrowheadStart: "none",
             arrowheadEnd,
-            richText: toRichText(""), // Clean arrow shaft! No printed text on or breaking arrow shafts
-            labelColor: "black",
+            richText: toRichText(arrowLabel),
+            labelColor: connColor,
             font: "sans",
           },
           meta: {
@@ -462,8 +486,8 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
           },
         });
         bindings.push(
-          { type: "arrow", fromId: arrowId, toId: fromId, props: { terminal: "start", normalizedAnchor: anchorValue[connection.fromAnchor], isPrecise: true, isExact: false, snap: "none" } },
-          { type: "arrow", fromId: arrowId, toId: toId, props: { terminal: "end", normalizedAnchor: anchorValue[connection.toAnchor], isPrecise: true, isExact: false, snap: "none" } },
+          { type: "arrow", fromId: arrowId, toId: fromId, props: { terminal: "start", normalizedAnchor: safeAnchorNorm(connection.fromAnchor), isPrecise: true, isExact: false, snap: "none" } },
+          { type: "arrow", fromId: arrowId, toId: toId, props: { terminal: "end", normalizedAnchor: safeAnchorNorm(connection.toAnchor), isPrecise: true, isExact: false, snap: "none" } },
         );
       } catch (err) {
         console.warn("[chalkie] arrow creation notice", err);
@@ -493,12 +517,9 @@ function syncScene(editor: Editor, lesson: LessonPlan, visibleIds?: Set<string>,
 
 interface PresenterCursorState {
   visible: boolean;
-  x: number;
-  y: number;
-  label?: string;
-  action?: string;
   targetBox?: { x: number; y: number; w: number; h: number } | null;
-  isDrawing?: boolean;
+  hoverX?: number;
+  hoverY?: number;
 }
 
 function frameCanvasScene(editor: Editor, duration = 420) {
@@ -510,16 +531,71 @@ function frameCanvasScene(editor: Editor, duration = 420) {
     return;
   }
   const vp = editor.getViewportScreenBounds();
-  const pad = 64;
+  const pad = 56;
   const scaleX = (vp.width - pad) / bounds.width;
   const scaleY = (vp.height - pad) / bounds.height;
-  // Frame comfortably: keep zoom between 0.72 and 1.05 so shapes and text are large and legible
-  const targetZoom = Math.min(1.05, Math.max(0.72, Math.min(scaleX, scaleY)));
+  // Frame comfortably: allow scaling down to 0.48 so all nodes fit with generous margins
+  const targetZoom = Math.min(1.02, Math.max(0.48, Math.min(scaleX, scaleY)));
   editor.setCamera({
     x: vp.width / 2 - bounds.midX * targetZoom,
     y: vp.height / 2 - bounds.midY * targetZoom,
     z: targetZoom,
   }, { animation: { duration } });
+}
+
+function computeVisibleShapeIds(
+  lesson: LessonPlan,
+  activeStep: number,
+  isPresenting: boolean
+): Set<string> | undefined {
+  if (!isPresenting) return undefined;
+
+  const rawTargets = new Set(
+    lesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds || [])
+  );
+
+  const visible = new Set(rawTargets);
+
+  // If a child is visible, ensure its parent container/frame is visible so children are not orphaned
+  for (const obj of lesson.objects) {
+    if (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame") {
+      const hasVisibleChild = lesson.objects.some((child) => {
+        if (!visible.has(child.id)) return false;
+        const isInside =
+          child.x >= obj.x - 30 &&
+          child.x + child.width <= obj.x + obj.width + 30 &&
+          child.y >= obj.y - 30 &&
+          child.y + child.height <= obj.y + obj.height + 30;
+        const isNamed =
+          child.id.toLowerCase().includes(obj.id.toLowerCase()) ||
+          (obj.id.includes("layer") && (child.id.includes("neuron") || child.id.includes("node")));
+        return isInside || isNamed;
+      });
+
+      if (hasVisibleChild) {
+        visible.add(obj.id);
+      }
+    }
+  }
+
+  // If a container itself is targeted, also reveal its internal components
+  for (const obj of lesson.objects) {
+    if (rawTargets.has(obj.id) && (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame")) {
+      for (const child of lesson.objects) {
+        const isInside =
+          child.x >= obj.x - 20 &&
+          child.x + child.width <= obj.x + obj.width + 20 &&
+          child.y >= obj.y - 20 &&
+          child.y + child.height <= obj.y + obj.height + 20;
+        const isNamed = child.id.toLowerCase().includes(obj.id.toLowerCase());
+        if (isInside || isNamed) {
+          visible.add(child.id);
+        }
+      }
+    }
+  }
+
+  return visible;
 }
 
 export function ChalkCanvas({
@@ -539,7 +615,7 @@ export function ChalkCanvas({
 }) {
   const editorRef = useRef<Editor | null>(null);
   const lessonIdRef = useRef<string | null>(null);
-  const [cursor, setCursor] = useState<PresenterCursorState>({ visible: false, x: 0, y: 0 });
+  const [cursor, setCursor] = useState<PresenterCursorState>({ visible: false });
   const [laidOutLesson, setLaidOutLesson] = useState<LessonPlan | null>(null);
   const [hoveredArrow, setHoveredArrow] = useState<{
     x: number;
@@ -579,9 +655,7 @@ export function ChalkCanvas({
       editor.user.updateUserPreferences({ colorScheme: "dark" });
     } catch {}
     if (effectiveLesson && effectiveLesson.objects.length > 0) {
-      const visibleIds = isPresenting
-        ? new Set(effectiveLesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
-        : undefined;
+      const visibleIds = computeVisibleShapeIds(effectiveLesson, activeStep, isPresenting);
       syncScene(editor, effectiveLesson, visibleIds, true);
       lessonIdRef.current = effectiveLesson.id;
     }
@@ -594,9 +668,7 @@ export function ChalkCanvas({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !effectiveLesson || !effectiveLesson.objects.length) return;
-    const visibleIds = isPresenting
-      ? new Set(effectiveLesson.segments.slice(0, activeStep + 1).flatMap((segment) => segment.targetIds))
-      : undefined;
+    const visibleIds = computeVisibleShapeIds(effectiveLesson, activeStep, isPresenting);
     const reset = lessonIdRef.current !== effectiveLesson.id;
     syncScene(editor, effectiveLesson, visibleIds, reset);
     lessonIdRef.current = effectiveLesson.id;
@@ -646,30 +718,71 @@ export function ChalkCanvas({
     const ids = activeSegment.targetIds.map((id) => createShapeId(id)).filter((id) => editor.getShape(id));
     if (!ids.length) return;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
+    const baseTransforms = new Map<TLShapeId, { id: TLShapeId; type: string; x: number; y: number; rotation: number; opacity: number }>();
+
+    // Snapshot canonical base state before triggering micro-animations
+    for (const id of ids) {
+      const shape = editor.getShape(id);
+      if (shape) {
+        baseTransforms.set(id, {
+          id,
+          type: shape.type,
+          x: shape.x,
+          y: shape.y,
+          rotation: shape.rotation ?? 0,
+          opacity: shape.opacity ?? 1,
+        });
+      }
+    }
+
     const bounds = ids.map((id) => editor.getShapePageBounds(id)).filter(Boolean);
     if (bounds.length) {
       const left = Math.min(...bounds.map((box) => box!.minX));
       const top = Math.min(...bounds.map((box) => box!.minY));
       const right = Math.max(...bounds.map((box) => box!.maxX));
       const bottom = Math.max(...bounds.map((box) => box!.maxY));
+      const vp = editor.getViewportScreenBounds();
+      const sceneBounds = editor.getCurrentPageBounds();
+      const overviewZoom = sceneBounds
+        ? Math.min(
+            Math.max(0.48, (vp.width - 120) / Math.max(sceneBounds.width, 100)),
+            Math.max(0.48, (vp.height - 120) / Math.max(sceneBounds.height, 100)),
+            0.78
+          )
+        : 0.65;
+
+      const targetW = Math.max(right - left, 540);
+      const targetH = Math.max(bottom - top, 380);
+      const centerX = (left + right) / 2;
+      const centerY = (top + bottom) / 2;
+
       editor.zoomToBounds(
-        { x: left, y: top, w: Math.max(right - left, 140), h: Math.max(bottom - top, 90) },
-        { animation: { duration: 420 }, inset: 120, targetZoom: 0.95 }
+        { x: centerX - targetW / 2, y: centerY - targetH / 2, w: targetW, h: targetH },
+        { animation: { duration: 420 }, inset: 64, targetZoom: Math.min(0.72, Math.max(overviewZoom, 0.58)) }
       );
     }
 
     ids.forEach((id, index) => {
       const timer = setTimeout(() => {
         const shape = editor.getShape(id);
-        if (!shape) return;
-        const reset = { id, type: shape.type, x: shape.x, y: shape.y, rotation: shape.rotation, opacity: shape.opacity };
+        const base = baseTransforms.get(id);
+        if (!shape || !base) return;
+
+        // Never rotate or translate arrow shapes - arrows are bound to shapes and moving them disrupts bindings!
+        if (shape.type === "arrow") {
+          editor.animateShape({ id, type: shape.type, opacity: 0.35 }, { animation: { duration: 240 } });
+          timers.push(setTimeout(() => editor.animateShape({ id, type: shape.type, opacity: base.opacity }, { animation: { duration: 320 } }), 280));
+          return;
+        }
+
+        const reset = { id, type: shape.type, x: base.x, y: base.y, rotation: base.rotation, opacity: base.opacity };
         if (activeSegment.action === "rotate") {
-          editor.animateShape({ ...reset, rotation: shape.rotation + Math.PI / 2 }, { animation: { duration: 700 } });
+          editor.animateShape({ ...reset, rotation: base.rotation + Math.PI / 2 }, { animation: { duration: 700 } });
           timers.push(setTimeout(() => editor.animateShape(reset, { animation: { duration: 420 } }), 760));
         } else if (["move", "flow", "orbit", "trace"].includes(activeSegment.action)) {
           const dx = activeSegment.action === "orbit" ? 18 : 14;
           const dy = activeSegment.action === "orbit" ? -12 : 0;
-          editor.animateShape({ ...reset, x: shape.x + dx, y: shape.y + dy }, { animation: { duration: 420 } });
+          editor.animateShape({ ...reset, x: base.x + dx, y: base.y + dy }, { animation: { duration: 420 } });
           timers.push(setTimeout(() => editor.animateShape(reset, { animation: { duration: 420 } }), 470));
         } else if (activeSegment.action === "pulse" || activeSegment.action === "focus") {
           editor.animateShape({ ...reset, opacity: 0.35 }, { animation: { duration: 240 } });
@@ -681,6 +794,29 @@ export function ChalkCanvas({
 
     return () => {
       timers.forEach(clearTimeout);
+      // Guaranteed pristine restore: snap any in-flight animated shapes back to canonical layout state
+      for (const [sId, base] of baseTransforms.entries()) {
+        const cur = editor.getShape(sId);
+        if (cur) {
+          const isDistorted =
+            Math.abs(cur.x - base.x) > 0.1 ||
+            Math.abs(cur.y - base.y) > 0.1 ||
+            Math.abs((cur.rotation ?? 0) - base.rotation) > 0.01 ||
+            Math.abs((cur.opacity ?? 1) - base.opacity) > 0.01;
+          if (isDistorted) {
+            try {
+              editor.updateShape({
+                id: sId,
+                type: cur.type as any,
+                x: base.x,
+                y: base.y,
+                rotation: base.rotation,
+                opacity: base.opacity,
+              });
+            } catch {}
+          }
+        }
+      }
     };
   }, [activeSegment]);
 
@@ -706,86 +842,67 @@ export function ChalkCanvas({
       const now = performance.now();
       const elapsed = now - startTime;
 
-      // Determine the CURRENT focused target shape:
-      // Priority 1: explicitly passed activeTargetId from speech synthesis word boundary tracking
-      // Priority 2: smoothly progress through activeSegment.targetIds proportionally over duration
-      let currentShapeId = ids[0];
-      if (activeTargetId && editor.getShape(createShapeId(activeTargetId))) {
-        currentShapeId = createShapeId(activeTargetId);
-      } else if (ids.length > 1) {
-        const progress = Math.min(0.99, Math.max(0, elapsed / duration));
-        const index = Math.min(ids.length - 1, Math.floor(progress * ids.length));
-        currentShapeId = ids[index];
+      // Parse object ID and optional internal part index from activeTargetId (e.g. "central-solenoid#2")
+      const [targetBaseId, partIdxStr] = (activeTargetId || "").split("#");
+      const parsedPartIdx =
+        partIdxStr !== undefined && !isNaN(parseInt(partIdxStr, 10)) ? parseInt(partIdxStr, 10) : -1;
+
+      // 1. Determine the base object
+      let currentObj = targetBaseId
+        ? effectiveLesson?.objects.find((obj) => obj.id === targetBaseId) || null
+        : null;
+
+      // 2. Fallback to activeSegment targets if not resolved
+      if (!currentObj) {
+        if (ids.length > 1) {
+          const progress = Math.min(0.99, Math.max(0, elapsed / duration));
+          const index = Math.min(ids.length - 1, Math.floor(progress * ids.length));
+          const fallbackShapeId = ids[index];
+          currentObj =
+            effectiveLesson?.objects.find((obj) => createShapeId(obj.id) === fallbackShapeId) || null;
+        } else if (activeSegment.targetIds.length > 0) {
+          currentObj =
+            effectiveLesson?.objects.find((obj) => obj.id === activeSegment.targetIds[0]) || null;
+        }
       }
 
-      const activeObj = effectiveLesson?.objects.find((obj) => createShapeId(obj.id) === currentShapeId);
-      const label = activeObj?.label || activeSegment.action;
+      const currentShapeId = currentObj ? createShapeId(currentObj.id) : ids[0];
       const b0 = editor.getShapePageBounds(currentShapeId) || editor.getShapePageBounds(ids[0]);
-      if (!b0) return;
+      if (!b0 && !currentObj) return;
 
-      let pageX = b0.midX;
-      let pageY = b0.midY;
+      let shapeBounds = b0 || {
+        minX: currentObj?.x || 0,
+        minY: currentObj?.y || 0,
+        maxX: (currentObj?.x || 0) + (currentObj?.width || 100),
+        maxY: (currentObj?.y || 0) + (currentObj?.height || 60),
+        midX: (currentObj?.x || 0) + (currentObj?.width || 100) / 2,
+        midY: (currentObj?.y || 0) + (currentObj?.height || 60) / 2,
+        width: currentObj?.width || 100,
+        height: currentObj?.height || 60,
+      };
 
-      const isDrawing = elapsed < 1400;
-      let currentLabel = activeObj?.label || activeSegment.title || activeSegment.action;
-
-      if (isDrawing) {
-        const progress = Math.min(1, elapsed / 1400); // 0 to 1
-        // Active Whiteboard Drawing: Laser traces the shape boundary on canvas!
-        let tx = b0.minX;
-        let ty = b0.minY;
-        if (progress < 0.25) {
-          const t = progress / 0.25;
-          tx = b0.minX + (b0.maxX - b0.minX) * t;
-          ty = b0.minY;
-        } else if (progress < 0.5) {
-          const t = (progress - 0.25) / 0.25;
-          tx = b0.maxX;
-          ty = b0.minY + (b0.maxY - b0.minY) * t;
-        } else if (progress < 0.75) {
-          const t = (progress - 0.5) / 0.25;
-          tx = b0.maxX - (b0.maxX - b0.minX) * t;
-          ty = b0.maxY;
-        } else {
-          const t = (progress - 0.75) / 0.25;
-          tx = b0.minX;
-          ty = b0.maxY - (b0.maxY - b0.minY) * t;
-        }
-        // Natural hand-drawn chalk jitter
-        const sketchJitter = Math.sin(progress * 28) * 2.5;
-        pageX = tx + sketchJitter;
-        pageY = ty + sketchJitter;
-        currentLabel = `Drawing ${activeObj?.label || "diagram"}`;
-      } else {
-        // Explaining & Pointing Phase: Laser glides into shape center and hovers
-        if (activeSegment.action === "trace" && ids.length >= 2) {
-          const lastId = ids[ids.length - 1];
-          const bLast = editor.getShapePageBounds(lastId) || b0;
-          const rawT = Math.min(1, Math.max(0, (elapsed - 1400) / (duration * 0.75)));
-          const easeT = rawT < 0.5 ? 2 * rawT * rawT : -1 + (4 - 2 * rawT) * rawT;
-          pageX = b0.midX + (bLast.midX - b0.midX) * easeT;
-          pageY = b0.midY + (bLast.midY - b0.midY) * easeT;
-        } else if (activeSegment.action === "rotate" || activeSegment.action === "orbit") {
-          const radius = Math.max(b0.width, b0.height) * 0.45 + 16;
-          const angle = elapsed * 0.003;
-          pageX = b0.midX + Math.cos(angle) * radius;
-          pageY = b0.midY + Math.sin(angle) * radius;
-        } else if (activeSegment.action === "move" || activeSegment.action === "flow") {
-          const offset = Math.sin(elapsed * 0.004) * 18;
-          pageX = b0.midX + offset;
-          pageY = b0.midY;
-        } else {
-          // Natural teacher pointing hover around the center/feature
-          const hoverX = Math.cos(elapsed * 0.0025) * 6;
-          const hoverY = Math.sin(elapsed * 0.003) * 5;
-          pageX = b0.midX + hoverX;
-          pageY = b0.midY + hoverY;
-        }
+      if (parsedPartIdx >= 0 && currentObj?.parts?.[parsedPartIdx]) {
+        const part = currentObj.parts[parsedPartIdx];
+        const scaleX = shapeBounds.width / Math.max(1, currentObj.width);
+        const scaleY = shapeBounds.height / Math.max(1, currentObj.height);
+        const partMinX = shapeBounds.minX + part.x * scaleX;
+        const partMinY = shapeBounds.minY + part.y * scaleY;
+        const partMaxX = partMinX + part.width * scaleX;
+        const partMaxY = partMinY + part.height * scaleY;
+        shapeBounds = {
+          minX: partMinX,
+          minY: partMinY,
+          maxX: partMaxX,
+          maxY: partMaxY,
+          midX: (partMinX + partMaxX) / 2,
+          midY: (partMinY + partMaxY) / 2,
+          width: partMaxX - partMinX,
+          height: partMaxY - partMinY,
+        };
       }
 
-      const screenPos = editor.pageToViewport({ x: pageX, y: pageY });
-      const minVp = editor.pageToViewport({ x: b0.minX, y: b0.minY });
-      const maxVp = editor.pageToViewport({ x: b0.maxX, y: b0.maxY });
+      const minVp = editor.pageToViewport({ x: shapeBounds.minX, y: shapeBounds.minY });
+      const maxVp = editor.pageToViewport({ x: shapeBounds.maxX, y: shapeBounds.maxY });
       const targetBox = {
         x: minVp.x,
         y: minVp.y,
@@ -793,14 +910,15 @@ export function ChalkCanvas({
         h: maxVp.y - minVp.y,
       };
 
+      // Subtle breathing float for teacher laser pointer
+      const hoverX = Math.cos(elapsed * 0.0025) * 5;
+      const hoverY = Math.sin(elapsed * 0.003) * 4;
+
       setCursor({
         visible: true,
-        x: screenPos.x,
-        y: screenPos.y,
-        label: currentLabel,
-        action: activeSegment.action,
         targetBox,
-        isDrawing,
+        hoverX,
+        hoverY,
       });
 
       animationFrameId = requestAnimationFrame(updatePointer);
@@ -865,63 +983,52 @@ export function ChalkCanvas({
         </div>
       )}
 
-      {/* Synchronized Live Teacher Presenter Cursor & Spotlight Halo */}
-      {cursor.visible && (
+      {/* Synchronized Live Teacher Presenter Cursor & Focus Box (Clean - no pills or text obstruction) */}
+      {cursor.visible && cursor.targetBox && (
         <div className="absolute inset-0 pointer-events-none overflow-hidden z-30">
-          {/* Subtle Ambient Target Spotlight (non-blocking) */}
-          {cursor.targetBox && (
-            <div
-              className={`absolute pointer-events-none rounded-2xl transition-all duration-300 ${
-                cursor.isDrawing
-                  ? "bg-amber-400/[0.04] ring-1 ring-amber-400/30"
-                  : "bg-blue-400/[0.03] ring-1 ring-blue-400/25 shadow-[0_0_24px_rgba(59,130,246,0.15)]"
-              }`}
-              style={{
-                left: `${cursor.targetBox.x - 8}px`,
-                top: `${cursor.targetBox.y - 8}px`,
-                width: `${cursor.targetBox.w + 16}px`,
-                height: `${cursor.targetBox.h + 16}px`,
-              }}
-            />
-          )}
-
-          {/* Sleek Presenter Laser Cursor (zero visual obstruction) */}
+          {/* Luminous Active Component Focus Box */}
           <div
-            className="absolute pointer-events-none transition-transform duration-75 ease-out"
+            className="absolute pointer-events-none rounded-2xl transition-all duration-300 ease-out bg-cyan-400/[0.06] ring-2 ring-cyan-400/80 shadow-[0_0_32px_rgba(6,182,212,0.35),inset_0_0_20px_rgba(6,182,212,0.08)]"
             style={{
-              transform: `translate3d(${cursor.x}px, ${cursor.y}px, 0)`,
-              willChange: "transform",
+              left: `${cursor.targetBox.x - 8}px`,
+              top: `${cursor.targetBox.y - 8}px`,
+              width: `${cursor.targetBox.w + 16}px`,
+              height: `${cursor.targetBox.h + 16}px`,
+            }}
+          />
+
+          {/* Sleek Presenter Laser Cursor (Mathematically locked directly to the active focus box) */}
+          <div
+            className="absolute pointer-events-none transition-all duration-300 ease-out"
+            style={{
+              left: `${cursor.targetBox.x + cursor.targetBox.w / 2}px`,
+              top: `${cursor.targetBox.y + cursor.targetBox.h / 2}px`,
             }}
           >
-            <div className="relative">
-              {/* Laser Beacon Pulse at the arrow tip (0, 0) */}
-              <div className="absolute -top-1.5 -left-1.5 pointer-events-none">
-                <div
-                  className={`h-4 w-4 rounded-full animate-ping opacity-60 ${
-                    cursor.isDrawing ? "bg-amber-400" : "bg-rose-500"
-                  }`}
-                />
-                <div
-                  className={`absolute top-1 left-1 h-2 w-2 rounded-full border border-white ${
-                    cursor.isDrawing
-                      ? "bg-amber-300 shadow-[0_0_12px_#fbbf24]"
-                      : "bg-rose-500 shadow-[0_0_12px_#f43f5e]"
-                  }`}
-                />
+            <div
+              className="relative"
+              style={{
+                transform: `translate3d(${cursor.hoverX ?? 0}px, ${cursor.hoverY ?? 0}px, 0)`,
+              }}
+            >
+              {/* Laser Beacon Pulse concentric with arrow tip at (0, 0) */}
+              <div className="absolute -top-2 -left-2 w-4 h-4 pointer-events-none">
+                <div className="w-4 h-4 rounded-full bg-rose-500 animate-ping opacity-60" />
+                <div className="absolute top-1 left-1 w-2 h-2 rounded-full border border-white bg-rose-500 shadow-[0_0_14px_#f43f5e]" />
               </div>
 
-              {/* Presenter Arrow Cursor pointing directly at (0, 0) */}
+              {/* Presenter Arrow Cursor with tip pointing directly at (0, 0) */}
               <svg
                 width="22"
                 height="22"
                 viewBox="0 0 24 24"
                 fill="none"
                 className="drop-shadow-[0_2px_8px_rgba(0,0,0,0.85)] filter"
-                style={{ transform: "translate(0px, 0px)" }}
+                style={{ transform: "translate(-4px, -3px)" }}
               >
                 <path
                   d="M4 3L11.5 21L14.8 13.8L22 10.5L4 3Z"
-                  fill={cursor.isDrawing ? "#f59e0b" : "#ef4444"}
+                  fill="#ef4444"
                   stroke="#ffffff"
                   strokeWidth="1.8"
                   strokeLinejoin="round"

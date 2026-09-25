@@ -117,8 +117,12 @@ VISUAL PARADIGM BY DOMAIN (WHAT TO DRAW):
          * Outer boundary (type: "ellipse", width: 130, height: 130, x: 5, y: 5, fill: "none", stroke: "ink", strokeWidth: 2).
          * Quarks triplet (type: "quarks", data: "u,d,d", width: 120, height: 120, x: 10, y: 10): 1 Up quark (blue, +2/3) and 2 Down quarks (red, -1/3) bound by gluon springs.
        - Connections: Connect Atom -> Proton and Atom -> Neutron (clean directional links).
-5. QUANTITATIVE & ECONOMICS (e.g. Supply & Demand, Velocity, Thermodynamics):
-   - Draw complete coordinate frame with "axes" primitive (data: "x:Label|y:Label"), smooth plotted curves (path/polyline), equilibrium points (ellipse), and shift arrows!
+5. QUANTITATIVE, GRAPHS & COORDINATE PLOTS (e.g. Velocity-Time, Supply & Demand, Sigmoid, Loss Curves, Phase Diagrams, Normal Distribution, Waveforms):
+   - COMPLETE GRAPH MANDATE: A graph MUST ALWAYS CONTAIN BOTH:
+     (1) The coordinate frame with "axes" part: (type: "axes", data: "x:Independent Variable (units)|y:Dependent Variable (units)", width: W, height: H, stroke: "ink").
+     (2) The plotted mathematical curve or trajectory: (type: "path" or "polyline", stroke: "cyan" | "yellow" | "green", strokeWidth: 3).
+     (3) Plotted data points or key vertices: (type: "ellipse", data: "point", width: 10, height: 10, fill: "cyan" | "yellow", text: "Point Label").
+   - NEVER emit axes without plotted data curves/points! NEVER emit points without the coordinate axes! Both MUST be present!
 6. URBAN PLANNING, ARCHITECTURE, CIVILIZATIONS & ANCIENT HISTORY (e.g. Indus Valley, Roman Aqueduct, Mohenjo-Daro, Pyramids, Grid Cities):
    - Draw an AUTHENTIC UNIFIED ARCHITECTURAL PLAN, NOT disconnected empty boxes!
    - For Indus Valley City Planning:
@@ -211,7 +215,7 @@ SPATIAL GEOMETRY & COMPOSITION (Clean, Collision-Free Digital Chalkboard):
   * coil: spring, inductor, magnetic field, helix (data: turn count 3-16).
   * radial: gear, rotor, optical rays, turbine (data: spoke count 4-24).
   * line / arrow: force vectors, ray tracings, flow direction.
-  * axes: quantitative frame (data: "x:Variable|y:Variable").
+  * axes: quantitative frame with labeled X and Y axes (data: "x:Independent Variable|y:Dependent Variable"). ALWAYS pair with plotted curve (polyline/path) and key data points (ellipse with data: "point").
 
 CONNECTIONS:
 - Connections represent real physical flow, force, or data transfer.

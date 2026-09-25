@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: chalkie
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm run build
+    startCommand: node server.mjs
+    envVars:
+      - key: NODE_VERSION
+        value: 22.13.0
+      - key: NODE_ENV
+        value: production
+      - key: HOSTNAME
+        value: 0.0.0.0
+      - key: BYOK_ENCRYPTION_SECRET
+        generateValue: true
