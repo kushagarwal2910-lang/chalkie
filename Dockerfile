@@ -1,8 +1,8 @@
 FROM node:22-slim AS base
 WORKDIR /app
 
-# Enable Corepack for pnpm
-RUN corepack enable pnpm
+# Install pnpm directly
+RUN npm install -g pnpm@latest
 
 # --- Dependencies stage ---
 FROM base AS deps
