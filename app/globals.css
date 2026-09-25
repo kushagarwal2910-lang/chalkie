@@ -61,6 +61,12 @@ button { color: inherit; }
   100% { box-shadow: 0 0 0 0 #f43f5e00; transform: scale(1); }
 }
 
+.animate-laser-float { animation: laserFloat 3s ease-in-out infinite; }
+@keyframes laserFloat {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(4px, -3px, 0); }
+}
+
 .tldraw-shell .tl-container { background: #0c0d12; color-scheme: dark; }
 .tldraw-shell .tl-background { background: #0c0d12 !important; }
 .tldraw-shell .tlui-layout__top,

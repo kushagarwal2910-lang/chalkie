@@ -17,10 +17,10 @@ declare module "tldraw" {
     [CHALK_VISUAL_TYPE]: {
       w: number;
       h: number;
-      label: string;
-      labelPlacement: "inside" | "below" | "above" | "left" | "right" | "none";
-      role: string;
-      partsJson: string;
+      label?: string;
+      labelPlacement?: "inside" | "below" | "above" | "left" | "right" | "none";
+      role?: string;
+      partsJson?: string;
     };
   }
 }
@@ -409,26 +409,31 @@ function renderObjectChassis(role: string, w: number, h: number, hasAxes: boolea
 }
 
 function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
-  const parts = safeParts(shape.props.partsJson);
+  const parts = safeParts(shape.props.partsJson || "[]");
   const uid = shape.id.replace(/[^a-z0-9]/gi, "");
   const markerId = `arrow-${uid}`;
   const objectClipId = `${markerId}-object-clip`;
   const plotClipId = `${markerId}-plot-clip`;
   const axesPart = parts.find((part) => part.type === "axes");
   const plot = axesPart ? axisPlot(axesPart) : null;
-  const lines = labelLines(shape.props.label);
-  const isAbove = shape.props.labelPlacement === "above";
-  const isBelow = shape.props.labelPlacement === "below";
-  const isContainer = ["container", "environment", "layer", "field", "formula"].includes(shape.props.role);
+  const labelText = shape.props.label || "";
+  const lines = labelLines(labelText);
+  const labelPlacement = shape.props.labelPlacement || "below";
+  const role = shape.props.role || "component";
+  const isAbove = labelPlacement === "above";
+  const isBelow = labelPlacement === "below";
+  const isContainer = ["container", "environment", "layer", "field", "formula"].includes(role);
   const pillFontSize = isContainer ? 13 : 11;
   const estimatedPillH = lines.length > 1 ? pillFontSize * 2 + 12 : pillFontSize + 10;
+  const shapeW = Math.max(20, shape.props.w || 180);
+  const shapeH = Math.max(20, shape.props.h || 120);
   const labelY = isAbove
     ? Math.max(16, estimatedPillH / 2 + 2)
     : isBelow
-      ? shape.props.h - estimatedPillH / 2 - 2
-      : shape.props.h / 2;
-  let maxPartX = shape.props.w;
-  let maxPartY = shape.props.h;
+      ? shapeH - estimatedPillH / 2 - 2
+      : shapeH / 2;
+  let maxPartX = shapeW;
+  let maxPartY = shapeH;
   for (const part of parts) {
     if (part.x + (part.width || 0) > maxPartX) maxPartX = part.x + (part.width || 0);
     if (part.y + (part.height || 0) > maxPartY) maxPartY = part.y + (part.height || 0);
@@ -440,12 +445,12 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
       }
     }
   }
-  const fitScale = Math.min(1.0, shape.props.w / Math.max(1, maxPartX), shape.props.h / Math.max(1, maxPartY));
-  const designW = shape.props.w;
-  const designH = shape.props.h;
+  const fitScale = Math.min(1.0, shapeW / Math.max(1, maxPartX), shapeH / Math.max(1, maxPartY));
+  const designW = shapeW;
+  const designH = shapeH;
 
   return (
-    <SVGContainer width={shape.props.w} height={shape.props.h} viewBox={`0 0 ${designW} ${designH}`}>
+    <SVGContainer width={shapeW} height={shapeH} viewBox={`0 0 ${designW} ${designH}`}>
       <defs>
         {/* Directional Vector Markers */}
         <marker id={markerId} markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">
@@ -552,7 +557,7 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
       </defs>
 
       <g className="chalk-shape-container">
-        {renderObjectChassis(shape.props.role, designW, designH, Boolean(axesPart), parts.length > 0, uid, shape.props.label)}
+        {renderObjectChassis(role, designW, designH, Boolean(axesPart), parts.length > 0, uid, labelText)}
 
         <g filter={`url(#${markerId}-shadow)`} clipPath={`url(#${objectClipId})`} transform={fitScale < 1 ? `scale(${fitScale})` : undefined}>
         {parts.map((part, index) => {
@@ -560,11 +565,11 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
           let rawFill = palette[part.fill] ?? palette.none;
 
           // Automatic gradient upgrades for physical realism
-          if (part.fill === "yellow" && (shape.props.label.toLowerCase().includes("pin") || shape.props.label.toLowerCase().includes("gold"))) {
+          if (part.fill === "yellow" && (labelText.toLowerCase().includes("pin") || labelText.toLowerCase().includes("gold"))) {
             rawFill = `url(#${markerId}-gold)`;
-          } else if (part.fill === "slate" && (shape.props.label.toLowerCase().includes("chip") || shape.props.label.toLowerCase().includes("die") || shape.props.label.toLowerCase().includes("substrate"))) {
+          } else if (part.fill === "slate" && (labelText.toLowerCase().includes("chip") || labelText.toLowerCase().includes("die") || labelText.toLowerCase().includes("substrate"))) {
             rawFill = `url(#${markerId}-silicon)`;
-          } else if (part.fill === "cyan" && (shape.props.label.toLowerCase().includes("electron") || shape.props.label.toLowerCase().includes("charge") || shape.props.label.toLowerCase().includes("tunnel"))) {
+          } else if (part.fill === "cyan" && (labelText.toLowerCase().includes("electron") || labelText.toLowerCase().includes("charge") || labelText.toLowerCase().includes("tunnel"))) {
             rawFill = `url(#${markerId}-energy)`;
           }
 
@@ -1295,18 +1300,18 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
             fontWeight="600"
             filter={`url(#${markerId}-glow)`}
           >
-            {formatMathFormula(shape.props.label)}
+            {formatMathFormula(labelText)}
           </text>
         )}
       </g>
 
       {/* Production-Grade Label Badge */}
-      {shape.props.labelPlacement !== "none" && shape.props.label && (() => {
+      {labelPlacement !== "none" && labelText && (() => {
         // Dedicated formula cards already feature their title in the top header beside f(x)
-        if (shape.props.role === "formula") return null;
+        if (role === "formula") return null;
 
         const cleanBase = (str: string) => str.trim().toLowerCase().replace(/^the\s+/, "").replace(/[^a-z0-9]/g, "");
-        const targetClean = cleanBase(shape.props.label);
+        const targetClean = cleanBase(labelText);
         // If an inner visual part already displays this label, suppress the redundant pill badge!
         const hasIdenticalPartText = parts.some((p) => {
           if (!p.text) return false;
@@ -1315,15 +1320,15 @@ function VisualSvg({ shape }: { shape: ChalkVisualShape }) {
         });
         if (hasIdenticalPartText) return null;
 
-        const isContainer = ["container", "environment", "layer", "field"].includes(shape.props.role);
+        const isContainer = ["container", "environment", "layer", "field"].includes(role);
         let fontSize = isContainer ? 12 : 11;
         // Clean display label: remove leading colons, hyphens, or punctuation artifacts
-        const displayLabel = formatMathFormula(shape.props.label).replace(/^[:\s\-—]+/, "").trim();
+        const displayLabel = formatMathFormula(labelText).replace(/^[:\s\-—]+/, "").trim();
         if (!displayLabel) return null;
 
         const pillPadX = 10;
         const pillPadY = 4;
-        const maxPillW = Math.max(80, shape.props.w - 12);
+        const maxPillW = Math.max(80, shapeW - 12);
 
         // Dynamically auto-scale font size if text is long to prevent premature truncation
         const estCharW = fontSize * 0.52;
@@ -1449,10 +1454,10 @@ export class ChalkVisualShapeUtil extends BaseBoxShapeUtil<ChalkVisualShape> {
   static override props: RecordProps<ChalkVisualShape> = {
     w: T.number,
     h: T.number,
-    label: T.string,
-    labelPlacement: T.literalEnum("inside", "below", "above", "left", "right", "none"),
-    role: T.string,
-    partsJson: T.string,
+    label: T.optional(T.string),
+    labelPlacement: T.optional(T.literalEnum("inside", "below", "above", "left", "right", "none")),
+    role: T.optional(T.string),
+    partsJson: T.optional(T.string),
   };
 
   getDefaultProps(): ChalkVisualShape["props"] {
@@ -1465,7 +1470,7 @@ export class ChalkVisualShapeUtil extends BaseBoxShapeUtil<ChalkVisualShape> {
 
   getIndicatorPath(shape: ChalkVisualShape) {
     const path = new Path2D();
-    path.roundRect(0, 0, shape.props.w, shape.props.h, 12);
+    path.roundRect(0, 0, Math.max(10, shape.props.w || 180), Math.max(10, shape.props.h || 120), 12);
     return path;
   }
 }
