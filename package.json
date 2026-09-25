@@ -10,7 +10,7 @@
     "dev": "node server.mjs",
     "dev:next": "next dev",
     "dev:vercel": "vercel dev",
-    "build": "next build",
+    "build": "next build && node scripts/verify-build-styles.mjs",
     "start": "node server.mjs",
     "start:next": "next start",
     "lint": "eslint . --ignore-pattern .next",

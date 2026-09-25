@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "tldraw/tldraw.css";
-import "./globals.css";
+import "./chalkie.css";
 
 export const metadata: Metadata = {
   title: "Chalkie — visual lessons, drawn live",
