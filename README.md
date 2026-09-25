@@ -296,11 +296,30 @@ Open `http://localhost:3000`. Chalkie starts using its custom `server.mjs`, powe
 
 ## 🧪 Verification & Testing
 
+For Render production deployments, set `NEXT_PUBLIC_TLDRAW_LICENSE_KEY` in the
+service's Environment settings **before building**, then choose **Save, rebuild,
+and deploy**. Next.js embeds public variables in its browser bundles, so restarting
+an existing build does not install a new key. Docker builds accept this variable as
+a build argument. The SDK needs an active key covering the deployed hostname;
+localhost can work without one even when production will not. See the
+[tldraw license setup](https://tldraw.dev/sdk-features/license-key).
+
+Playback waits for the requested canvas scene to finish layout and paint. New
+visuals become visible on the actual voice start event. Device voices use word
+boundaries for cursor timing when supported, with rate-aware estimates otherwise.
+Recorded TTS uses its actual media clock and duration; without word timestamps,
+individual word positions in that recording are approximate. If the SDK removes
+the editor because a license is missing or expired, Chalkie stops narration and
+shows a whiteboard error.
+
 Chalkie includes automated verification test scripts in `scratch/`:
 
 ```bash
 # Typecheck TypeScript codebase
 npm run typecheck
+
+# Regression checks for delayed canvas loading, speech timing, buffering, and cancellation
+node --experimental-strip-types --test scratch/test-playback-sync.mjs
 
 # Verify WCAG 2.1 AAA color contrast ratios across all chalk fills
 node scratch/test-wcag-contrast.mjs

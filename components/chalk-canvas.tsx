@@ -15,6 +15,8 @@ import { CHALK_VISUAL_TYPE, chalkShapeUtils } from "@/components/chalk-visual-sh
 import { CUSTOM_CHART_TYPE, CUSTOM_SVG_TYPE, CUSTOM_TEMPLATE_TYPE } from "@/components/custom-shapes";
 import { applyElkLayout } from "@/lib/elk-spatial-layout";
 import { formatMathFormula } from "@/lib/math-formatter";
+import type { CanvasPlaybackState } from "@/lib/playback-sync";
+import { getProgressiveVisibleObjects } from "@/lib/progressive-scene";
 
 const tldrawColor: Record<string, "black" | "grey" | "blue" | "light-blue" | "violet" | "orange" | "green" | "red" | "yellow"> = {
   ink: "light-blue", slate: "grey", blue: "blue", cyan: "light-blue", violet: "violet", orange: "orange", green: "green", red: "red", yellow: "yellow", white: "light-blue", none: "light-blue",
@@ -282,59 +284,6 @@ function anchorPoint(object: VisualObject, anchor?: VisualConnection["fromAnchor
 
 const BACKDROP_ROLES = new Set(["environment", "container", "layer", "field", "path"]);
 
-function getProgressiveVisibleObjects(
-  lesson: LessonPlan,
-  activeStep: number,
-  isPresenting: boolean
-): VisualObject[] {
-  // When not presenting or at/past the final segment, show all objects
-  if (!isPresenting || activeStep >= lesson.segments.length - 1) {
-    return lesson.objects;
-  }
-
-  // Accumulate all targets introduced from Step 0 up through the current activeStep
-  const cumulativeTargets = new Set<string>();
-  for (let i = 0; i <= activeStep && i < lesson.segments.length; i++) {
-    const seg = lesson.segments[i];
-    if (seg && Array.isArray(seg.targetIds)) {
-      seg.targetIds.forEach((t) => {
-        cumulativeTargets.add(t);
-        if (t.includes("#")) cumulativeTargets.add(t.split("#")[0]);
-      });
-    }
-  }
-
-  const visible = lesson.objects.filter((obj) => {
-    // Structural backdrops or frame containers remain visible
-    if (BACKDROP_ROLES.has(obj.role) || obj.shapeType === "frame") return true;
-
-    if (cumulativeTargets.has(obj.id)) return true;
-
-    const objIdLower = obj.id.toLowerCase();
-    const objLabelLower = (obj.label || "").toLowerCase();
-    for (const target of cumulativeTargets) {
-      const tLower = target.toLowerCase();
-      if (
-        objIdLower.includes(tLower) ||
-        tLower.includes(objIdLower) ||
-        objLabelLower.includes(tLower) ||
-        tLower.includes(objLabelLower)
-      ) {
-        return true;
-      }
-    }
-    return false;
-  });
-
-  // Safety fallback: ensure at least proportional objects are visible so canvas is never blank
-  if (visible.length === 0 && lesson.objects.length > 0) {
-    const fraction = Math.min(1, (activeStep + 1) / Math.max(1, lesson.segments.length));
-    const count = Math.max(1, Math.ceil(fraction * lesson.objects.length));
-    return lesson.objects.slice(0, count);
-  }
-
-  return visible;
-}
 
 function syncScene(
   editor: Editor,
@@ -622,6 +571,9 @@ export function ChalkCanvas({
   isPresenting,
   isSpeaking = false,
   activeTargetId = null,
+  revealedStep = null,
+  playbackRequest = 0,
+  onPlaybackState,
 }: {
   lesson?: LessonPlan | null;
   activeSegment?: LessonSegment | null;
@@ -629,11 +581,17 @@ export function ChalkCanvas({
   isPresenting: boolean;
   isSpeaking?: boolean;
   activeTargetId?: string | null;
+  revealedStep?: number | null;
+  playbackRequest?: number;
+  onPlaybackState?: (state: CanvasPlaybackState) => void;
 }) {
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const editorRef = useRef<Editor | null>(null);
+  const [mountedEditor, setMountedEditor] = useState<Editor | null>(null);
+  const [licenseBlocked, setLicenseBlocked] = useState(false);
   const lessonIdRef = useRef<string | null>(null);
   const [cursor, setCursor] = useState<PresenterCursorState>({ visible: false });
-  const [laidOutLesson, setLaidOutLesson] = useState<LessonPlan | null>(null);
+  const [laidOutLesson, setLaidOutLesson] = useState<{ input: LessonPlan; value: LessonPlan } | null>(null);
   const [hoveredArrow, setHoveredArrow] = useState<{
     x: number;
     y: number;
@@ -651,48 +609,95 @@ export function ChalkCanvas({
     }
 
     // Immediately clear stale laid-out lesson from any previous topic so it never leaks
-    setLaidOutLesson((prev) => (prev && prev.id === lesson.id ? prev : null));
+    setLaidOutLesson(null);
 
     let active = true;
     applyElkLayout(lesson).then((res) => {
-      if (active) setLaidOutLesson(res);
+      if (active) setLaidOutLesson({ input: lesson, value: res });
     }).catch((err) => {
       console.warn("[chalkie] ELK layout fallback", err);
-      if (active) setLaidOutLesson(lesson);
+      if (active) setLaidOutLesson({ input: lesson, value: lesson });
     });
 
     return () => { active = false; };
   }, [lesson]);
 
-  const effectiveLesson = (laidOutLesson && laidOutLesson.id === lesson?.id) ? laidOutLesson : lesson;
+  const effectiveLesson = laidOutLesson?.input === lesson ? laidOutLesson?.value : null;
+  const isProgressive = revealedStep !== null;
+
+  // The SDK removes its editor in production when its license check fails.
+  // Observe that lifecycle instead of continuing to narrate against a stale Editor ref.
+  useEffect(() => {
+    const shell = shellRef.current;
+    if (!shell) return;
+    const checkLicense = () => setLicenseBlocked(!!shell.querySelector('[data-testid="tl-license-expired"]'));
+    const observer = new MutationObserver(checkLicense);
+    observer.observe(shell, { childList: true, subtree: true });
+    checkLicense();
+    return () => observer.disconnect();
+  }, []);
 
   const handleMount = useCallback((editor: Editor) => {
     editorRef.current = editor;
+    setMountedEditor(editor);
     try {
       editor.user.updateUserPreferences({ colorScheme: "dark" });
     } catch {}
-    if (effectiveLesson && effectiveLesson.objects.length > 0) {
-      syncScene(editor, effectiveLesson, activeStep, isPresenting, true);
-      lessonIdRef.current = effectiveLesson.id;
-    }
-    window.setTimeout(() => {
-      frameCanvasScene(editor, 400);
-    }, 100);
-  }, [effectiveLesson, activeStep, isPresenting]);
+    return () => {
+      editorRef.current = null;
+      setMountedEditor(null);
+      lessonIdRef.current = null;
+    };
+  }, []);
 
   // Synchronize whiteboard shapes on lesson, activeStep, or presentation mode changes
   useEffect(() => {
-    const editor = editorRef.current;
+    onPlaybackState?.({ status: "loading", request: playbackRequest });
+    if (licenseBlocked) {
+      onPlaybackState?.({ status: "error", request: playbackRequest, message: "The whiteboard needs a valid tldraw production license. Narration is paused until the canvas is available." });
+      return;
+    }
+    const editor = mountedEditor;
     if (!editor || !effectiveLesson || !effectiveLesson.objects.length) return;
     const reset = lessonIdRef.current !== effectiveLesson.id;
-    syncScene(editor, effectiveLesson, activeStep, isPresenting, reset);
+    try {
+      syncScene(editor, effectiveLesson, activeStep, isProgressive, reset);
+      // Render the upcoming scene invisibly while speech buffers/queues. Reveal it
+      // only on the voice's actual start event; previous steps stay on the board.
+      const revealedIds = new Set(getProgressiveVisibleObjects(effectiveLesson, revealedStep ?? activeStep, isProgressive).map((object) => object.id));
+      const opacityUpdates: TLShapePartial[] = [];
+      for (const object of effectiveLesson.objects) {
+        const shape = editor.getShape(createShapeId(object.id));
+        if (shape) opacityUpdates.push({ id: shape.id, type: shape.type, opacity: revealedIds.has(object.id) ? 1 : 0 });
+      }
+      for (const connection of effectiveLesson.connections) {
+        const shape = editor.getShape(createShapeId(connection.id));
+        if (shape) opacityUpdates.push({ id: shape.id, type: shape.type, opacity: revealedIds.has(connection.from) && revealedIds.has(connection.to) ? 1 : 0 });
+      }
+      editor.updateShapes(opacityUpdates);
+    } catch {
+      onPlaybackState?.({ status: "error", request: playbackRequest, message: "The whiteboard could not prepare this step. Please reload and try again." });
+      return;
+    }
     lessonIdRef.current = effectiveLesson.id;
     if (reset) {
-      window.setTimeout(() => {
-        frameCanvasScene(editor, 500);
-      }, 60);
+      frameCanvasScene(editor, 0);
     }
-  }, [effectiveLesson, activeStep, isPresenting]);
+    // Store updates are synchronous, React shape rendering is not. Wait for a paint
+    // before releasing narration, including after a slow dynamic import or ELK layout.
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        if (!shellRef.current?.querySelector(".tl-canvas")) return;
+        const visible = getProgressiveVisibleObjects(effectiveLesson, activeStep, isProgressive);
+        if (visible.some((object) => !editor.getShape(createShapeId(object.id)))) {
+          onPlaybackState?.({ status: "error", request: playbackRequest, message: "Some lesson visuals could not be drawn. Please retry this lesson." });
+          return;
+        }
+        onPlaybackState?.({ status: "ready", request: playbackRequest });
+      });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [effectiveLesson, activeStep, isProgressive, revealedStep, mountedEditor, licenseBlocked, playbackRequest, onPlaybackState]);
 
   // Interactive Arrow Hover Detection: inspect arrow under pointer with generous margin
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
@@ -740,7 +745,7 @@ export function ChalkCanvas({
   useEffect(() => {
     const editor = editorRef.current;
     if (!editor || !activeSegment?.targetIds.length) return;
-    const ids = activeSegment.targetIds.map((id) => createShapeId(id)).filter((id) => editor.getShape(id));
+    const ids = activeSegment.targetIds.map((id) => createShapeId(id.split("#")[0])).filter((id) => editor.getShape(id));
     if (!ids.length) return;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     const baseTransforms = new Map<TLShapeId, { id: TLShapeId; type: string; x: number; y: number; rotation: number; opacity: number }>();
@@ -857,17 +862,17 @@ export function ChalkCanvas({
         }
       }
     };
-  }, [activeSegment]);
+  }, [activeSegment, mountedEditor, effectiveLesson]);
 
   // Deep Audio & Voice-Synchronized Teacher Laser Pointer tracking
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !isPresenting || !activeSegment || !activeSegment.targetIds.length) {
+    if (!editor || !isPresenting || !isSpeaking || licenseBlocked || !activeSegment || !activeSegment.targetIds.length) {
       setCursor((prev) => (prev.visible ? { visible: false } : prev));
       return;
     }
 
-    const ids = activeSegment.targetIds.map((id) => createShapeId(id)).filter((id) => editor.getShape(id));
+    const ids = activeSegment.targetIds.map((id) => createShapeId(id.split("#")[0])).filter((id) => editor.getShape(id));
     if (!ids.length) {
       setCursor((prev) => (prev.visible ? { visible: false } : prev));
       return;
@@ -972,10 +977,11 @@ export function ChalkCanvas({
       if (rafId !== null) cancelAnimationFrame(rafId);
       unsubscribe();
     };
-  }, [activeSegment, activeTargetId, isPresenting, effectiveLesson]);
+  }, [activeSegment, activeTargetId, isPresenting, isSpeaking, effectiveLesson, mountedEditor, licenseBlocked]);
 
   return (
     <div
+      ref={shellRef}
       className={`tldraw-shell relative w-full h-full overflow-hidden ${isPresenting ? "is-presenting" : ""}`}
       aria-label="Interactive lesson whiteboard"
       onPointerMove={handlePointerMove}
@@ -985,8 +991,16 @@ export function ChalkCanvas({
         shapeUtils={chalkShapeUtils}
         onMount={handleMount}
         licenseKey={process.env.NEXT_PUBLIC_TLDRAW_LICENSE_KEY}
-        components={{ StylePanel: null }}
       />
+
+      {licenseBlocked && (
+        <div role="alert" className="absolute inset-0 z-40 grid place-items-center bg-[#0c0d12] p-8 text-center">
+          <div className="max-w-sm space-y-3">
+            <h2 className="text-lg font-semibold text-white">Whiteboard unavailable</h2>
+            <p className="text-sm text-slate-300">This deployment needs a valid tldraw production license. Voice playback is paused so the explanation stays with its visuals.</p>
+          </div>
+        </div>
+      )}
 
       {/* Interactive Arrow Hover Tooltip Pill */}
       {hoveredArrow && (

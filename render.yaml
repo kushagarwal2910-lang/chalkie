@@ -13,5 +13,8 @@ services:
         value: production
       - key: HOSTNAME
         value: 0.0.0.0
+      # Next.js embeds this public SDK license during the build, not at startup.
+      - key: NEXT_PUBLIC_TLDRAW_LICENSE_KEY
+        sync: false
       - key: BYOK_ENCRYPTION_SECRET
         generateValue: true

@@ -69,11 +69,8 @@ button { color: inherit; }
 
 .tldraw-shell .tl-container { background: #0c0d12; color-scheme: dark; }
 .tldraw-shell .tl-background { background: #0c0d12 !important; }
-.tldraw-shell .tlui-layout__top,
-.tldraw-shell .tlui-layout__bottom {
-  z-index: 10;
-  pointer-events: auto !important;
-}
+/* Keep tldraw's pointer-events defaults: layout wrappers cover the canvas, so
+   making them interactive swallows canvas drags. The toolbar buttons opt in. */
 
 /* Tldraw Arrow Label Polish: sleek, single-line, crystal-clear typography */
 .tl-text-label {
@@ -112,4 +109,3 @@ div[data-next-badge],
   visibility: hidden !important;
   pointer-events: none !important;
 }
-

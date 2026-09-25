@@ -36,7 +36,7 @@ import {
   PanelRightOpen,
   SlidersHorizontal,
 } from "lucide-react";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { followUpPlanSchema, lessonPlanSchema, type LessonPlan, type LessonSegment } from "@/lib/lesson-schema";
 import { useRealtime } from "@/hooks/use-realtime";
 import { clearAllClientStorage, loadCurrentLesson, loadLessonById, saveCurrentLesson } from "@/lib/client-storage";
@@ -47,6 +47,8 @@ import { ChalkieIcon } from "@/components/chalkie-icon";
 import { VoiceSettingsDialog } from "@/components/voice-settings-dialog";
 import { formatNarrationForSpeech } from "@/lib/speech-formatter";
 import { computeTargetPositions } from "@/lib/target-matcher";
+import { getProgressiveVisibleObjects } from "@/lib/progressive-scene";
+import { CanvasPlaybackGate, playDeviceNarration, playRecordedNarration, type CanvasPlaybackState } from "@/lib/playback-sync";
 import {
   getBestAvailableVoice,
   PREFERRED_VOICE_KEY,
@@ -151,6 +153,8 @@ export function ChalkieStudio() {
   const [promptMode, setPromptMode] = useState<"auto" | "doubt" | "new">("auto");
   const [isPlaying, setIsPlaying] = useState(false);
   const [activeStep, setActiveStep] = useState(0);
+  // null shows the completed board; -1 stages the first scene without revealing it.
+  const [revealedStep, setRevealedStep] = useState<number | null>(null);
   const [visualSegment, setVisualSegment] = useState<LessonSegment | null>(null);
   const [activeTargetId, setActiveTargetId] = useState<string | null>(null);
   const [prompt, setPrompt] = useState("");
@@ -193,8 +197,13 @@ export function ChalkieStudio() {
   });
   const abortRef = useRef<AbortController | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const audioUrlRef = useRef<string | null>(null);
+  const playbackAbortRef = useRef<AbortController | null>(null);
+  const [canvasGate] = useState(() => new CanvasPlaybackGate());
+  const [canvasError, setCanvasError] = useState<string | null>(null);
+  const [playbackRequest, setPlaybackRequest] = useState(0);
+  const playbackRequestRef = useRef(0);
   const stepTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const targetTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const playbackRunRef = useRef(0);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -210,6 +219,17 @@ export function ChalkieStudio() {
   const hasLesson = lesson.segments.length > 0;
   const isBusy = isGenerating || isFollowUpGenerating;
   const totalDuration = Math.round(lesson.segments.reduce((total, segment) => total + segment.durationMs, 0) / 1000);
+  const handleCanvasPlaybackState = useCallback((state: CanvasPlaybackState) => {
+    canvasGate.update(state);
+    if (state.status === "error") setCanvasError(state.message);
+    else if (state.status === "ready") setCanvasError(null);
+  }, [canvasGate]);
+
+  useEffect(() => {
+    if (canvasError) stopPlayback(false);
+    // Stop an already running voice if the SDK removes the editor after mounting.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [canvasError]);
 
   useEffect(() => {
     preferredGroqKeyRef.current = preferredGroqKeyId();
@@ -274,6 +294,8 @@ export function ChalkieStudio() {
       if (targetId && targetId !== lesson.id) {
         void loadLessonById(targetId).then((stored) => {
           if (stored) {
+            stopPlayback(false);
+            setRevealedStep(null);
             try {
               setLesson(repairAndValidateLessonPlan(stored));
             } catch {
@@ -313,7 +335,9 @@ export function ChalkieStudio() {
 
   useEffect(() => () => {
     abortRef.current?.abort();
+    playbackAbortRef.current?.abort();
     audioRef.current?.pause();
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
     if (stepTimerRef.current) clearTimeout(stepTimerRef.current);
     if (voiceMonitorRef.current) cancelAnimationFrame(voiceMonitorRef.current);
     void voiceContextRef.current?.close();
@@ -422,6 +446,7 @@ export function ChalkieStudio() {
           const generated = data.lesson as LessonPlan;
           pendingAutoplayRef.current = 0;
           setIsPlaying(true);
+          setRevealedStep(-1);
           setLesson({ ...generated, id: `${generated.id.slice(0, 56)}-${Date.now()}` });
           setActiveStep(0);
           setLastAnswer("");
@@ -444,7 +469,7 @@ export function ChalkieStudio() {
       if ((error as Error).name !== "AbortError") notify(error instanceof Error ? error.message : "Lesson generation failed");
     } finally {
       setIsGenerating(false);
-      if (pendingAutoplayRef.current === null && voiceState !== "speaking") setVoiceState("idle");
+      if (pendingAutoplayRef.current === null && !playbackAbortRef.current) setVoiceState("idle");
     }
   }
 
@@ -487,8 +512,9 @@ export function ChalkieStudio() {
           pendingAutoplayRef.current = merged.startIndex;
           setLastAnswer(plan.answer);
           setActiveStep(merged.startIndex);
+          setRevealedStep(merged.startIndex - 1);
           setIsPlaying(true);
-          setVoiceState("speaking");
+          setVoiceState("thinking");
           setLesson(merged.lesson);
           setGenerationStage(plan.coverage === "append" ? "Teaching the new connected visual" : "Pointing through the answer");
           notify(plan.coverage === "append" ? "New explanation added beside the lesson" : "Answering from the current board");
@@ -509,16 +535,19 @@ export function ChalkieStudio() {
 
   function stopPlayback(broadcast: boolean) {
     playbackRunRef.current += 1;
+    pendingAutoplayRef.current = null;
+    playbackAbortRef.current?.abort();
+    playbackAbortRef.current = null;
     setIsPlaying(false);
     setVisualSegment(null);
     setActiveTargetId(null);
     setVoiceState("idle");
     audioRef.current?.pause();
     audioRef.current = null;
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    audioUrlRef.current = null;
     window.speechSynthesis?.cancel();
     if (stepTimerRef.current) clearTimeout(stepTimerRef.current);
-    targetTimersRef.current.forEach(clearTimeout);
-    targetTimersRef.current = [];
     if (broadcast) sendRealtime({ type: "interrupt" });
   }
 
@@ -526,126 +555,112 @@ export function ChalkieStudio() {
     if (run !== playbackRunRef.current) return;
     const segment = lesson.segments[index];
     if (!segment) { stopPlayback(false); return; }
+    playbackAbortRef.current?.abort();
+    const controller = new AbortController();
+    playbackAbortRef.current = controller;
+    const { signal } = controller;
+    if (stepTimerRef.current) clearTimeout(stepTimerRef.current);
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    audioUrlRef.current = null;
+    window.speechSynthesis?.cancel();
     setIsPlaying(true);
+    setRevealedStep((current) => current === null || current >= index ? index - 1 : current);
     setVoiceState("thinking");
+    setVisualSegment(null);
+    setActiveTargetId(null);
 
-    // Format narration text for maximum speech clarity, unit expansion, and natural breath pauses
     const spokenNarration = formatNarrationForSpeech(segment.narration);
-
-    // Precalculate target mention positions in the spoken narration using high-precision linguistic matching
-    const targetPositions = computeTargetPositions(spokenNarration, segment.targetIds, lesson.objects);
-    const initialTargetId = (targetPositions.length > 0 && targetPositions[0].targetId)
-      ? targetPositions[0].targetId
-      : (segment.targetIds[0] ?? null);
-
+    const targetPositions = computeTargetPositions(spokenNarration, segment.targetIds, getProgressiveVisibleObjects(lesson, index, true));
+    const initialTargetId = segment.targetIds[0] ?? targetPositions[0]?.targetId ?? null;
+    const isCurrent = () => !signal.aborted && run === playbackRunRef.current;
     const beginVisualTeaching = () => {
-      if (run !== playbackRunRef.current) return false;
-      setActiveStep(index);
+      if (!isCurrent()) return;
+      setRevealedStep(index);
       setVisualSegment({ ...segment });
       setActiveTargetId(initialTargetId);
       setVoiceState("speaking");
       sendRealtime({ type: "timeline", segmentId: segment.id, targetIds: segment.targetIds, action: segment.action });
       sendRealtime({ type: "pointer", segmentId: segment.id, targetIds: segment.targetIds, action: segment.action });
+    };
+    const advance = () => {
+      if (!isCurrent()) return;
+      if (index + 1 < lesson.segments.length) void playStep(index + 1, run);
+      else { setRevealedStep(null); stopPlayback(false); }
+    };
+    const callbacks = {
+      signal,
+      cues: targetPositions,
+      onStart: beginVisualTeaching,
+      onTarget: (targetId: string) => { if (isCurrent()) setActiveTargetId(targetId); },
+      onEnd: advance,
+      onError: () => {
+        if (!isCurrent()) return;
+        stopPlayback(false);
+        notify("Voice playback could not start. Press Play to retry this step.");
+      },
+    };
 
-      // Start target progression timers synchronously when speech/audio actually begins
-      targetTimersRef.current.forEach(clearTimeout);
-      targetTimersRef.current = [];
-      if (targetPositions.length > 1) {
-        for (let i = 1; i < targetPositions.length; i++) {
-          const tp = targetPositions[i];
-          const targetTimeMs = Math.round((tp.charIndex / Math.max(1, spokenNarration.length)) * estimatedDurationMs);
-          const timer = setTimeout(() => {
-            if (playbackRunRef.current === run) {
-              setActiveTargetId(tp.targetId);
-            }
-          }, targetTimeMs);
-          targetTimersRef.current.push(timer);
+    try {
+      let recording: Blob | null = null;
+      if (process.env.NEXT_PUBLIC_USE_GROQ_TTS === "true") {
+        try {
+          const response = await fetch("/api/speech", {
+            method: "POST", signal, headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: spokenNarration, sessionId, preferredGroqKeyId: preferredGroqKeyRef.current }),
+          });
+          if (!isCurrent()) return;
+          const providerHeader = response.headers.get("x-chalkie-provider-status");
+          if (providerHeader) {
+            try { handleProviderStatus(JSON.parse(decodeURIComponent(providerHeader))); }
+            catch { /* ignore malformed optional status */ }
+          }
+          if (response.ok) recording = await response.blob();
+        } catch (error) {
+          if (!isCurrent()) return;
+          console.warn("[chalkie] speech request failed; using device voice", error);
         }
       }
+      if (!isCurrent()) return;
 
-      return true;
-    };
+      // Request this exact step only after its audio has buffered. Wait for ELK,
+      // the editor, and the scene's first paint before starting either voice path.
+      const request = ++playbackRequestRef.current;
+      setActiveStep(index);
+      setPlaybackRequest(request);
+      await canvasGate.wait(request, signal);
+      if (!isCurrent()) return;
 
-    const advance = () => {
-      if (run !== playbackRunRef.current) return;
-      if (index + 1 < lesson.segments.length) void playStep(index + 1, run);
-      else { setIsPlaying(false); setActiveTargetId(null); setVoiceState("idle"); }
-    };
-
-    // Clear any previous scheduled target transitions
-    targetTimersRef.current.forEach(clearTimeout);
-    targetTimersRef.current = [];
-
-    // Precise speech duration estimation (13 characters per second normal speech rate)
-    const estimatedDurationMs = Math.max(
-      segment.durationMs || 4500,
-      Math.round((spokenNarration.length / 13) * 1000)
-    );
-
-    if (process.env.NEXT_PUBLIC_USE_GROQ_TTS === "true") {
-      try {
-        const response = await fetch("/api/speech", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: spokenNarration, sessionId, preferredGroqKeyId: preferredGroqKeyRef.current }) });
-        const providerHeader = response.headers.get("x-chalkie-provider-status");
-        if (providerHeader) {
-          try { handleProviderStatus(JSON.parse(decodeURIComponent(providerHeader))); }
-          catch { /* ignore malformed optional status */ }
-        }
-        if (response.ok) {
-          const url = URL.createObjectURL(await response.blob());
-          const audio = new Audio(url);
-          audioRef.current = audio;
-          audio.onended = () => { URL.revokeObjectURL(url); advance(); };
-          audio.onerror = () => { URL.revokeObjectURL(url); advance(); };
-          if (!beginVisualTeaching()) return;
-          await audio.play();
-          return;
-        }
-      } catch { /* use the device voice below */ }
-    }
-
-    if ("speechSynthesis" in window) {
-      const utterance = new SpeechSynthesisUtterance(spokenNarration);
-      const voices = window.speechSynthesis.getVoices();
-      const preferredUri = typeof window !== "undefined" ? window.localStorage.getItem(PREFERRED_VOICE_KEY) : null;
-      utterance.voice = getBestAvailableVoice(voices, preferredUri);
-
-      const storedRate = typeof window !== "undefined" ? window.localStorage.getItem(SPEECH_RATE_KEY) : null;
-      const rate = storedRate ? parseFloat(storedRate) : DEFAULT_SPEECH_RATE;
-      utterance.rate = !isNaN(rate) && rate >= 0.7 && rate <= 1.3 ? rate : DEFAULT_SPEECH_RATE;
-      utterance.pitch = DEFAULT_SPEECH_PITCH;
-
-      // Real-time word and sentence boundary synchronization:
-      // When the teacher voice speaks the name of a component, the laser pointer instantly glides to it!
-      utterance.onboundary = (event) => {
-        if (event.name === "word" || event.name === "sentence") {
-          const match = [...targetPositions].reverse().find((tp) => event.charIndex >= tp.charIndex - 2);
-          if (match) {
-            setActiveTargetId(match.targetId);
-          }
-        }
-      };
-
-      const speechStartTime = Date.now();
-      const minStepDuration = Math.max(segment.durationMs || 4500, 3000);
-      const safeAdvance = () => {
-        if (run !== playbackRunRef.current) return;
-        const elapsed = Date.now() - speechStartTime;
-        if (elapsed < minStepDuration) {
-          stepTimerRef.current = setTimeout(advance, minStepDuration - elapsed);
-        } else {
-          advance();
-        }
-      };
-
-      utterance.onend = safeAdvance;
-      utterance.onerror = safeAdvance;
-      if (!beginVisualTeaching()) return;
-      window.speechSynthesis.speak(utterance);
-    } else {
-      if (!beginVisualTeaching()) return;
-      stepTimerRef.current = setTimeout(advance, segment.durationMs || 4500);
+      if (recording) {
+        const url = URL.createObjectURL(recording);
+        audioUrlRef.current = url;
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        playRecordedNarration(audio, spokenNarration.length, callbacks);
+        return;
+      }
+      if ("speechSynthesis" in window) {
+        const utterance = new SpeechSynthesisUtterance(spokenNarration);
+        const voices = window.speechSynthesis.getVoices();
+        const preferredUri = window.localStorage.getItem(PREFERRED_VOICE_KEY);
+        utterance.voice = getBestAvailableVoice(voices, preferredUri);
+        const storedRate = window.localStorage.getItem(SPEECH_RATE_KEY);
+        const rate = storedRate ? parseFloat(storedRate) : DEFAULT_SPEECH_RATE;
+        utterance.rate = Number.isFinite(rate) && rate >= 0.7 && rate <= 1.3 ? rate : DEFAULT_SPEECH_RATE;
+        utterance.pitch = DEFAULT_SPEECH_PITCH;
+        playDeviceNarration(window.speechSynthesis, utterance, callbacks);
+      } else {
+        beginVisualTeaching();
+        stepTimerRef.current = setTimeout(advance, segment.durationMs || 4500);
+      }
+    } catch (error) {
+      if (!isCurrent()) return;
+      stopPlayback(false);
+      notify(error instanceof Error ? error.message : "The whiteboard is not ready yet.");
     }
   }
+
 
   function togglePlayback() {
     if (isPlaying) stopPlayback(true);
@@ -903,6 +918,7 @@ export function ChalkieStudio() {
                 await clearAllClientStorage();
                 try { await fetch("/api/reset", { method: "POST" }); } catch { /* ignore */ }
                 setLesson(emptyLesson);
+                setRevealedStep(null);
                 notify("Workspace cleared");
               }}
               className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-[#9ca3af] transition hover:bg-[#281116] hover:text-[#f87171]"
@@ -1029,9 +1045,12 @@ export function ChalkieStudio() {
                 lesson={lesson}
                 activeSegment={isPlaying ? visualSegment : null}
                 activeStep={activeStep}
+                revealedStep={revealedStep}
                 isPresenting={isPlaying}
                 isSpeaking={voiceState === "speaking"}
                 activeTargetId={activeTargetId}
+                playbackRequest={playbackRequest}
+                onPlaybackState={handleCanvasPlaybackState}
               />
 
               {!hasLesson && !isGenerating && (
@@ -1229,7 +1248,7 @@ export function ChalkieStudio() {
                 </div>
                 <div className="p-3">
                   <div className="flex items-center gap-3">
-                    <button disabled={!hasLesson} onClick={togglePlayback} aria-label={isPlaying ? "Pause lesson" : "Play lesson"} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#818cf8] text-[#090a0f] shadow-[0_6px_18px_#818cf844] transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:scale-100">
+                    <button disabled={!hasLesson || !!canvasError} onClick={togglePlayback} aria-label={isPlaying ? "Pause lesson" : "Play lesson"} className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#818cf8] text-[#090a0f] shadow-[0_6px_18px_#818cf844] transition hover:scale-105 disabled:cursor-not-allowed disabled:opacity-35 disabled:hover:scale-100">
                       {isPlaying ? <Pause size={16} fill="currentColor" /> : <Play size={16} fill="currentColor" className="ml-0.5" />}
                     </button>
                     <div className="min-w-0 flex-1">
@@ -1269,6 +1288,7 @@ export function ChalkieStudio() {
                       void playStep(index, run);
                     }}
                     key={step.id}
+                    disabled={!!canvasError}
                     aria-label={`Teach ${step.title}`}
                     className={`relative flex w-full gap-3 rounded-xl border p-3 text-left transition ${state === "active" ? "border-[#3d336b] bg-[#1c1a2e] shadow-sm" : "border-transparent hover:border-[#222636] hover:bg-[#141622]"}`}
                   >
