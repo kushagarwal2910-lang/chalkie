@@ -4,7 +4,7 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: corepack enable pnpm && pnpm install --frozen-lockfile && pnpm run build
+    buildCommand: npm install -g pnpm@latest && pnpm install --frozen-lockfile && pnpm run build
     startCommand: node server.mjs
     envVars:
       - key: NODE_VERSION
